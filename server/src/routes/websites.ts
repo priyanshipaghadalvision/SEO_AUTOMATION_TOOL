@@ -86,6 +86,23 @@ websitesRouter.delete("/:id", async (req, res) => {
     return;
   }
 
+  /**
+   * Tombstone, written after the transaction so it survives the purge above.
+   *
+   * The delete deliberately removes every audit row belonging to the website
+   * and its crawls -- correct for a hard delete, but it means a vanished site
+   * left no trace at all. Reconciling "there were 22 sites yesterday and 11
+   * today" was impossible as a result. This row is keyed to the user rather
+   * than the deleted website id, so nothing cascades it away, and it records
+   * the domain because the id is meaningless once the row is gone.
+   */
+  await logAuditEvent({
+    entityType: "user",
+    entityId: req.userId as string,
+    eventType: "website.deleted",
+    metadata: { domain: result.domain, websiteId: id, deletedCrawls: result.deletedCrawls },
+  });
+
   console.log(`[api] deleted website ${result.domain} (${result.deletedCrawls} crawl(s))`);
   res.json({ deleted: true, domain: result.domain, deletedCrawls: result.deletedCrawls });
 });

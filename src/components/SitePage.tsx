@@ -6,19 +6,50 @@ import { SiteAuditPanel } from "./SiteAuditPanel";
 import { IssuesPanel } from "./IssuesPanel";
 import { OptimizationsPanel } from "./OptimizationsPanel";
 import { SiteUrlsPanel } from "./SiteUrlsPanel";
-import "./CrawlPagesModal.css";
+import { Pagination } from "./Pagination";
+import { GSC_TABS, GscDataPanel } from "./GscDataPanel";
+import type { GscTab } from "./GscDataPanel";
+import "./Panel.css";
+import "./Modal.css";
+import "./SitePage.css";
 
-interface CrawlPagesModalProps {
+interface SitePageProps {
   crawlId: string;
-  /** Needed for the merged URL view, which spans crawls rather than one. */
+  /** The merged URL view spans a whole site, not one crawl. */
   websiteId?: string;
   domain: string;
   /** Carries siteAudit; may be absent if the caller hasn't loaded it. */
   crawl?: Crawl;
-  onClose: () => void;
+  /** Returns to the dashboard. */
+  onBack: () => void;
 }
 
-const PAGE_LIMIT = 200;
+/**
+ * Search Console sections are namespaced rather than flattened in, so adding a
+ * tab to GscDataPanel needs no edit here -- GSC_TABS drives that group.
+ */
+type Section = "urls" | "pages" | "issues" | "fixes" | `gsc:${GscTab}`;
+
+interface NavGroup {
+  title: string | null;
+  items: Array<{ key: Section; label: string; hint?: string }>;
+}
+
+const NAV_GROUPS: NavGroup[] = [
+  {
+    title: null,
+    items: [
+      { key: "urls", label: "All URLs", hint: "Every URL, crawl data and Search Console side by side" },
+      { key: "pages", label: "Crawled pages", hint: "What this crawl fetched, with full per-page detail" },
+      { key: "issues", label: "SEO issues", hint: "Findings grouped by type, with evidence" },
+      { key: "fixes", label: "Fixes", hint: "Concrete proposed changes awaiting review" },
+    ],
+  },
+  {
+    title: "Search Console",
+    items: GSC_TABS.map((t) => ({ key: `gsc:${t.key}` as Section, label: t.label })),
+  },
+];
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString();
@@ -38,30 +69,41 @@ function renderBadge(method: PageSummary["renderMethod"]) {
   return null;
 }
 
-export function CrawlPagesModal({ crawlId, websiteId, domain, crawl, onClose }: CrawlPagesModalProps) {
+export function SitePage({ crawlId, websiteId, domain, crawl, onBack }: SitePageProps) {
   const [pages, setPages] = useState<PageSummary[]>([]);
   const [total, setTotal] = useState(0);
   const [duplicates, setDuplicates] = useState<DuplicateGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  /** Term actually sent to the server; `search` is the box's live text. */
+  const [applied, setApplied] = useState("");
+  const [matched, setMatched] = useState(0);
+  const [offset, setOffset] = useState(0);
+  const [pageSize, setPageSize] = useState(100);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [tab, setTab] = useState<"urls" | "issues" | "fixes" | "pages">("urls");
+  const [tab, setTab] = useState<Section>("urls");
 
   // Full page records, fetched only when a row is expanded and then cached
   // so re-opening the same row is instant and costs no second request.
   const [details, setDetails] = useState<Record<string, Page>>({});
   const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null);
 
+  useEffect(() => setOffset(0), [crawlId, applied]);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    Promise.all([getCrawlPages(crawlId, { limit: PAGE_LIMIT }), getCrawlDuplicates(crawlId)])
+    Promise.all([
+      getCrawlPages(crawlId, { limit: pageSize, offset, search: applied || undefined }),
+      getCrawlDuplicates(crawlId),
+    ])
       .then(([list, dupes]) => {
         if (cancelled) return;
         setPages(list.pages);
         setTotal(list.total);
+        setMatched(list.matched);
         setDuplicates(dupes.duplicateGroups);
       })
       .catch((err) => {
@@ -74,15 +116,15 @@ export function CrawlPagesModal({ crawlId, websiteId, domain, crawl, onClose }: 
     return () => {
       cancelled = true;
     };
-  }, [crawlId]);
+  }, [crawlId, pageSize, offset, applied]);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") onBack();
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
+  }, [onBack]);
 
   async function toggleRow(page: PageSummary) {
     if (expandedId === page.id) {
@@ -113,80 +155,77 @@ export function CrawlPagesModal({ crawlId, websiteId, domain, crawl, onClose }: 
   // Hashes that belong to a duplicate group, so each affected row can be flagged.
   const duplicateHashes = useMemo(() => new Set(duplicates.map((g) => g.hash)), [duplicates]);
 
-  const filteredPages = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    if (!term) return pages;
-    return pages.filter(
-      (p) => p.url.toLowerCase().includes(term) || (p.title ?? "").toLowerCase().includes(term),
-    );
-  }, [pages, search]);
+  /*
+   * No client-side filter any more.
+   *
+   * The rows on screen are one page of a server-side query that already
+   * applied the search term, so re-filtering them would only ever hide rows
+   * the database deliberately returned.
+   */
+  const filteredPages = pages;
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div
-        className="modal-panel"
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Crawled pages for ${domain}`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="modal-header">
-          <div>
-            <h3>Crawled pages</h3>
-            <p className="muted small">{domain}</p>
-          </div>
-          <button type="button" className="modal-close" onClick={onClose} aria-label="Close">
-            &times;
-          </button>
+    <div className="site-page">
+      <header className="site-page-header">
+        <button type="button" className="btn btn-ghost btn-sm site-back" onClick={onBack}>
+          &larr; All websites
+        </button>
+        <div className="site-page-title">
+          <h2>{domain}</h2>
+          <p className="muted small">
+            {total > 0 ? `${total.toLocaleString()} pages crawled` : "Crawl detail"}
+          </p>
         </div>
+      </header>
 
-        <div className="modal-tabs" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === "urls"}
-            className={`modal-tab${tab === "urls" ? " modal-tab-active" : ""}`}
-            onClick={() => setTab("urls")}
-            title="Every URL, with crawl data and Search Console side by side"
-          >
-            All URLs
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === "pages"}
-            className={`modal-tab${tab === "pages" ? " modal-tab-active" : ""}`}
-            onClick={() => setTab("pages")}
-          >
-            Pages{total > 0 ? ` (${total})` : ""}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === "issues"}
-            className={`modal-tab${tab === "issues" ? " modal-tab-active" : ""}`}
-            onClick={() => setTab("issues")}
-          >
-            SEO Issues
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === "fixes"}
-            className={`modal-tab${tab === "fixes" ? " modal-tab-active" : ""}`}
-            onClick={() => setTab("fixes")}
-          >
-            Fixes
-          </button>
-        </div>
+        <div className="site-layout">
+          {/* Sidebar rather than a tab strip: the section list keeps growing,
+              and vertical space is far cheaper than horizontal here -- tabs
+              were already wrapping. It also leaves room for per-section
+              counts, which a cramped tab cannot show. */}
+          <nav className="site-nav" aria-label="Sections">
+            {NAV_GROUPS.map((group) => (
+              <Fragment key={group.title ?? "main"}>
+                {group.title && <p className="site-nav-group">{group.title}</p>}
+                {group.items.map((sec) => (
+                  <button
+                    key={sec.key}
+                    type="button"
+                    aria-current={tab === sec.key}
+                    className={`site-nav-item${tab === sec.key ? " site-nav-item-active" : ""}`}
+                    onClick={() => setTab(sec.key)}
+                    title={sec.hint}
+                  >
+                    <span className="site-nav-label">{sec.label}</span>
+                    {sec.key === "pages" && total > 0 && (
+                      <span className="site-nav-count">{total.toLocaleString()}</span>
+                    )}
+                  </button>
+                ))}
+              </Fragment>
+            ))}
+          </nav>
 
-        <div className="modal-body">
+          <div className="site-content">
           {tab === "urls" && websiteId && <SiteUrlsPanel websiteId={websiteId} />}
           {tab === "urls" && !websiteId && (
             <p className="muted small">
               This view needs the website id, which this crawl was opened without.
             </p>
           )}
+
+          {tab.startsWith("gsc:") &&
+            (websiteId ? (
+              <GscDataPanel
+                websiteId={websiteId}
+                domain={domain}
+                tab={tab.slice(4) as GscTab}
+              />
+            ) : (
+              <p className="muted small">
+                Search Console data is per website, and this crawl was opened without the website id.
+              </p>
+            ))}
           {tab === "issues" && <IssuesPanel crawlId={crawlId} />}
           {tab === "fixes" && <OptimizationsPanel crawlId={crawlId} />}
 
@@ -203,7 +242,7 @@ export function CrawlPagesModal({ crawlId, websiteId, domain, crawl, onClose }: 
 
           {!loading && !error && pages.length > 0 && (
             <>
-              <div className="modal-summary">
+              <div className="panel-summary">
                 <span className="muted small">
                   {total} page{total === 1 ? "" : "s"}
                   {renderedCount > 0 && (
@@ -232,13 +271,23 @@ export function CrawlPagesModal({ crawlId, websiteId, domain, crawl, onClose }: 
                     </>
                   )}
                 </span>
-                <input
-                  type="text"
-                  className="modal-search"
-                  placeholder="Filter by URL or title&hellip;"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
+                {/* Submit-to-search, because the query now runs against all
+                    10,000 pages rather than the handful already loaded --
+                    firing on every keystroke would be a request per letter. */}
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    setApplied(search.trim());
+                  }}
+                >
+                  <input
+                    type="text"
+                    className="panel-search"
+                    placeholder="Search all pages by URL or title, then Enter&hellip;"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                  />
+                </form>
               </div>
 
               <div className="pages-table-wrap">
@@ -324,14 +373,31 @@ export function CrawlPagesModal({ crawlId, websiteId, domain, crawl, onClose }: 
                   </tbody>
                 </table>
                 {filteredPages.length === 0 && (
-                  <p className="muted small pages-no-match">No pages match &ldquo;{search}&rdquo;.</p>
+                  <p className="muted small pages-no-match">
+                    {applied ? `No pages match “${applied}”.` : "No pages on this page of results."}
+                  </p>
                 )}
               </div>
+
+              {matched > 0 && (
+                <Pagination
+                  total={matched}
+                  offset={offset}
+                  pageSize={pageSize}
+                  busy={loading}
+                  noun="page"
+                  onChange={(next) => {
+                    setOffset(next.offset);
+                    setPageSize(next.pageSize);
+                    setExpandedId(null);
+                  }}
+                />
+              )}
             </>
           )}
           </>
           )}
-        </div>
+          </div>
       </div>
     </div>
   );

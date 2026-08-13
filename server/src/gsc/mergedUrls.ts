@@ -50,13 +50,22 @@ export interface MergedUrlRow {
 export interface MergedUrlsResult {
   rows: MergedUrlRow[];
   counts: Record<Bucket, number>;
+  /** Every URL in the view, ignoring the active filter. */
   total: number;
-  truncated: boolean;
+  /** URLs matching the active bucket/search filter -- what the pager counts. */
+  matched: number;
+  offset: number;
+  limit: number;
   /** Which crawl the crawl-side columns came from. */
   crawlId: string | null;
 }
 
-const MAX_ROWS = 2000;
+/**
+ * Rows per request. This is a page size, not a ceiling on the data: the pager
+ * walks the whole set. It used to be a hard 2,000-row cap that silently hid
+ * the other 8,500 URLs of a 10,508-URL site behind a "capped" note.
+ */
+const MAX_ROWS = 500;
 
 /**
  * Buckets are assigned in priority order, not by scoring, so every URL lands
@@ -65,10 +74,10 @@ const MAX_ROWS = 2000;
  */
 const BUCKET_SQL = sql`
   CASE
-    WHEN i.verdict IN ('FAIL', 'NEUTRAL') THEN 'not_indexed'
-    WHEN p.id IS NULL THEN 'not_crawled'
-    WHEN COALESCE(g.clicks, 0) > 0 THEN 'indexed_traffic'
-    WHEN COALESCE(g.impressions, 0) > 0 THEN 'indexed_no_clicks'
+    WHEN verdict IN ('FAIL', 'NEUTRAL') THEN 'not_indexed'
+    WHEN NOT crawled THEN 'not_crawled'
+    WHEN clicks > 0 THEN 'indexed_traffic'
+    WHEN impressions > 0 THEN 'indexed_no_clicks'
     ELSE 'crawled_no_data'
   END`;
 
@@ -76,7 +85,7 @@ export async function getMergedUrls(
   websiteId: string,
   propertyId: string | null,
   range: DateRange,
-  opts: { bucket?: Bucket; search?: string; limit?: number } = {},
+  opts: { bucket?: Bucket; search?: string; limit?: number; offset?: number } = {},
 ): Promise<MergedUrlsResult> {
   // Pin the crawl side to one crawl. Page rows exist per crawl, so joining
   // across all of them would count a URL once per crawl it appeared in.
@@ -92,7 +101,8 @@ export async function getMergedUrls(
   `);
   const crawlId = crawlRows[0]?.id ?? null;
 
-  const limit = Math.min(MAX_ROWS, opts.limit ?? MAX_ROWS);
+  const limit = Math.min(MAX_ROWS, Math.max(1, opts.limit ?? 100));
+  const offset = Math.max(0, opts.offset ?? 0);
 
   const conditions = [
     ...(opts.bucket ? [sql`bucket = ${opts.bucket}`] : []),
@@ -146,32 +156,90 @@ export async function getMergedUrls(
     ),
     merged AS (
       SELECT COALESCE(p.url, g.url) AS url,
-             ${BUCKET_SQL} AS bucket,
+             p.id IS NOT NULL AS crawled,
              p.http_status, p.title, p.word_count, p.inbound_link_count, p.noindex,
              COALESCE(p.issue_count, 0) AS issue_count,
              COALESCE(g.clicks, 0) AS clicks,
              COALESCE(g.impressions, 0) AS impressions,
-             COALESCE(g.ctr, 0) AS ctr,
              g.position,
              i.verdict, i.coverage_state
       FROM crawl p
       FULL OUTER JOIN gsc g ON g.k = p.k
       LEFT JOIN insp i ON i.k = COALESCE(p.k, g.k)
+    ),
+    /*
+     * One row per URL -- the promise this view makes, which the join alone
+     * does not keep.
+     *
+     * Rows are keyed on the URL we requested but displayed as the URL we
+     * landed on, so redirects collapse several keys onto one address: three
+     * crawled category paths all redirect to /android-games/, and Google
+     * reports two key variants of it. That produced four rows reading
+     * "/android-games/", each holding a fragment of the truth -- one had the
+     * 103 impressions, another had the crawl, the rest showed zeroes.
+     *
+     * Aggregating rather than picking a winner is why this is a GROUP BY and
+     * not a DISTINCT ON. Picking the highest-impression row looked right and
+     * was worse: it kept the Google-only row and so labelled a page we had
+     * crawled "not crawled". Traffic sums (every key's clicks landed on this
+     * one page), crawl facts come from whichever row was crawled, and the
+     * bucket is recomputed afterwards from the combined result -- so it can
+     * no longer contradict the row it labels.
+     *
+     * The redirect sources are not lost; the crawled-pages view still lists
+     * each one with its own target.
+     */
+    deduped AS (
+      SELECT url,
+             bool_or(crawled) AS crawled,
+             -- Crawl columns are NULL on Google-only rows, and max() skips
+             -- NULLs, so these take the crawled row's value when one exists.
+             max(http_status) AS http_status,
+             (array_agg(title ORDER BY (title IS NULL), inbound_link_count DESC NULLS LAST))[1] AS title,
+             max(word_count) AS word_count,
+             max(inbound_link_count) AS inbound_link_count,
+             bool_or(noindex) AS noindex,
+             -- max, not sum: a redirect source's own issues belong to the
+             -- source, and summing would inflate the destination's count.
+             max(issue_count) AS issue_count,
+             sum(clicks)::int AS clicks,
+             sum(impressions)::int AS impressions,
+             CASE WHEN sum(impressions) = 0 THEN 0
+                  ELSE sum(clicks)::float / sum(impressions) END AS ctr,
+             CASE WHEN sum(impressions) = 0 THEN NULL
+                  ELSE sum(position * impressions) / sum(impressions) END AS position,
+             -- Verdict and its explanation must come from the same row, so
+             -- both use one ordering: a real verdict first, then whichever
+             -- key Google sends the most traffic to.
+             (array_agg(verdict ORDER BY (verdict IS NULL), impressions DESC))[1] AS verdict,
+             (array_agg(coverage_state ORDER BY (verdict IS NULL), impressions DESC))[1] AS coverage_state
+      FROM merged
+      GROUP BY url
+    ),
+    bucketed AS (
+      SELECT *, ${BUCKET_SQL} AS bucket FROM deduped
     )`;
 
-  const [{ rows }, { rows: countRows }] = await Promise.all([
+  const [{ rows }, { rows: countRows }, { rows: matchedRows }] = await Promise.all([
     db.execute<Record<string, unknown>>(sql`
       WITH ${cte}
-      SELECT * FROM merged ${where}
+      SELECT * FROM bucketed ${where}
       ORDER BY impressions DESC, issue_count DESC, url
-      LIMIT ${limit}
+      LIMIT ${limit} OFFSET ${offset}
     `),
     // Counts always cover every bucket, ignoring the active filter -- the
     // cards are how you switch filters, so they must not collapse to the one
-    // you already chose.
+    // you already chose. Read from `deduped` too, or the cards would total
+    // more URLs than the table can ever show.
     db.execute<{ bucket: Bucket; n: number }>(sql`
       WITH ${cte}
-      SELECT bucket, count(*)::int AS n FROM merged GROUP BY bucket
+      SELECT bucket, count(*)::int AS n FROM bucketed GROUP BY bucket
+    `),
+    // The pager needs the filtered count, which the bucket cards cannot give:
+    // a search term narrows the set within whichever bucket is selected.
+    db.execute<{ n: number }>(sql`
+      WITH ${cte}
+      SELECT count(*)::int AS n FROM bucketed ${where}
     `),
   ]);
 
@@ -203,7 +271,9 @@ export async function getMergedUrls(
     })),
     counts,
     total: Object.values(counts).reduce((a, b) => a + b, 0),
-    truncated: rows.length >= limit,
+    matched: matchedRows[0]?.n ?? 0,
+    offset,
+    limit,
     crawlId,
   };
 }

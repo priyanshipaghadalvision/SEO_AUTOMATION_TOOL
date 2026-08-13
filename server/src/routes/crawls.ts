@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { and, eq, sql, desc } from "drizzle-orm";
+import { and, eq, ilike, or, sql, desc } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { crawls, issues, optimizations, pages, websites } from "../db/schema.js";
 import { logAuditEvent } from "../lib/audit.js";
@@ -11,7 +11,12 @@ import { updateCrawlStatusSchema } from "../schemas/website.js";
 const PAGES_DEFAULT_LIMIT = 200;
 const PAGES_MAX_LIMIT = 500;
 const ISSUES_MAX = 2000;
-const OPTIMIZATIONS_MAX = 2000;
+/**
+ * Proposals per request -- a page size, not a ceiling. This was a hard 2,000
+ * cap that hid every proposal past it behind a "truncated" note; the pager
+ * now walks the full set.
+ */
+const OPTIMIZATIONS_MAX = 500;
 
 const OPTIMIZATION_STATUSES = ["pending", "approved", "rejected", "applied"] as const;
 type OptimizationStatus = (typeof OPTIMIZATION_STATUSES)[number];
@@ -101,19 +106,39 @@ crawlsRouter.get("/:id/pages", async (req, res) => {
 
   const limit = Math.min(PAGES_MAX_LIMIT, Math.max(1, Number(req.query.limit) || PAGES_DEFAULT_LIMIT));
   const offset = Math.max(0, Number(req.query.offset) || 0);
+  const search = typeof req.query.search === "string" && req.query.search.trim() ? req.query.search.trim() : null;
 
-  const [rows, [{ total }]] = await Promise.all([
+  /*
+   * Search runs in the database, not the browser.
+   *
+   * It used to filter whichever page happened to be loaded, so on a
+   * 10,000-page crawl a term was matched against 200 rows and "no matches"
+   * meant "not in this page" -- indistinguishable from "not in this crawl".
+   */
+  const filters = [eq(pages.crawlId, id)];
+  if (search) {
+    const like = `%${search}%`;
+    filters.push(or(ilike(pages.url, like), ilike(pages.title, like))!);
+  }
+  const where = and(...filters);
+
+  const [rows, [{ total }], [{ matched }]] = await Promise.all([
     db
       .select(PAGE_LIST_COLUMNS)
       .from(pages)
-      .where(eq(pages.crawlId, id))
-      .orderBy(desc(pages.discoveredAt))
+      // `id` breaks discoveredAt ties: pages inserted in the same batch share
+      // a timestamp, and an unstable order duplicates or skips rows paging.
+      .orderBy(desc(pages.discoveredAt), pages.id)
+      .where(where)
       .limit(limit)
       .offset(offset),
     db.select({ total: sql<number>`count(*)::int` }).from(pages).where(eq(pages.crawlId, id)),
+    db.select({ matched: sql<number>`count(*)::int` }).from(pages).where(where),
   ]);
 
-  res.json({ pages: rows, total, limit, offset });
+  // `total` is the crawl's page count (headline), `matched` respects the
+  // search term (what the pager walks). They differ only while filtering.
+  res.json({ pages: rows, total, matched, limit, offset });
 });
 
 /** Full record for one page, including every heavy field omitted from the list. */
@@ -175,14 +200,27 @@ crawlsRouter.get("/:id/issues", async (req, res) => {
 
   const severityFilter = req.query.severity as string | undefined;
   const typeFilter = req.query.type as string | undefined;
+  // Paged so a type with more instances than the bulk cap is still fully
+  // reachable. Without this the UI could only say "not loaded" for anything
+  // past the first 2,000 issues of a crawl.
+  const limit = Math.min(ISSUES_MAX, Math.max(1, Number(req.query.limit) || ISSUES_MAX));
+  const offset = Math.max(0, Number(req.query.offset) || 0);
   const conditions = [eq(issues.crawlId, id)];
   if (severityFilter === "critical" || severityFilter === "warning" || severityFilter === "notice") {
     conditions.push(eq(issues.severity, severityFilter));
   }
   if (typeFilter) conditions.push(eq(issues.type, typeFilter));
 
-  const [rows, bySeverity, byType] = await Promise.all([
-    db.select().from(issues).where(and(...conditions)).orderBy(issues.severity, issues.type).limit(ISSUES_MAX),
+  const [rows, bySeverity, byType, [{ matched }]] = await Promise.all([
+    db
+      .select()
+      .from(issues)
+      .where(and(...conditions))
+      // Ordered by id as the tiebreaker so paging is stable: without a unique
+      // final sort key, two pages can repeat or skip rows.
+      .orderBy(issues.severity, issues.type, issues.id)
+      .limit(limit)
+      .offset(offset),
     db
       .select({ severity: issues.severity, count: sql<number>`count(*)::int` })
       .from(issues)
@@ -200,9 +238,21 @@ crawlsRouter.get("/:id/issues", async (req, res) => {
       .where(eq(issues.crawlId, id))
       .groupBy(issues.type, issues.severity, issues.risk, issues.autoFixable)
       .orderBy(sql`count(*) DESC`),
+    // Total for the *filtered* set, so the UI can offer "load more" against a
+    // real number rather than guessing from a full page.
+    db.select({ matched: sql<number>`count(*)::int` }).from(issues).where(and(...conditions)),
   ]);
 
-  res.json({ issues: rows, bySeverity, byType, truncated: rows.length >= ISSUES_MAX });
+  res.json({
+    issues: rows,
+    bySeverity,
+    byType,
+    matched,
+    limit,
+    offset,
+    hasMore: offset + rows.length < matched,
+    truncated: rows.length >= ISSUES_MAX,
+  });
 });
 
 /** Re-runs analysis against already-crawled data. No re-crawl, no new requests. */
@@ -256,14 +306,20 @@ crawlsRouter.get("/:id/optimizations", async (req, res) => {
     conditions.push(eq(optimizations.status, statusFilter as OptimizationStatus));
   }
 
-  const [rows, byAction, byStatus] = await Promise.all([
+  const limit = Math.min(OPTIMIZATIONS_MAX, Math.max(1, Number(req.query.limit) || 100));
+  const offset = Math.max(0, Number(req.query.offset) || 0);
+
+  const [rows, byAction, byStatus, [{ matched }]] = await Promise.all([
     db
       .select()
       .from(optimizations)
       .where(and(...conditions))
       // Highest-confidence proposals first so the easiest wins are at the top.
-      .orderBy(optimizations.action, desc(optimizations.confidence))
-      .limit(OPTIMIZATIONS_MAX),
+      // `id` breaks ties: without it, equal-confidence rows can be ordered
+      // differently between pages and a proposal shows twice or never.
+      .orderBy(optimizations.action, desc(optimizations.confidence), optimizations.id)
+      .limit(limit)
+      .offset(offset),
     db
       .select({
         action: optimizations.action,
@@ -279,13 +335,20 @@ crawlsRouter.get("/:id/optimizations", async (req, res) => {
       .from(optimizations)
       .where(eq(optimizations.crawlId, id))
       .groupBy(optimizations.status),
+    // Counted with the status filter applied -- that is what the pager walks.
+    db
+      .select({ matched: sql<number>`count(*)::int` })
+      .from(optimizations)
+      .where(and(...conditions)),
   ]);
 
   res.json({
     optimizations: rows,
     byAction,
     byStatus,
-    truncated: rows.length >= OPTIMIZATIONS_MAX,
+    matched,
+    offset,
+    limit,
   });
 });
 

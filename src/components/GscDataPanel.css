@@ -1,0 +1,567 @@
+.gsc-overview { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+.gsc-stat-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+}
+
+.gsc-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border, #d6dde6);
+  border-radius: 8px;
+  background: var(--card-bg, #fff);
+}
+
+.gsc-stat-value { font-size: 22px; font-weight: 700; color: var(--navy, #16345c); line-height: 1.1; }
+
+.gsc-stat-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted, #5b6472);
+}
+
+/* ---------- Trend chart ---------- */
+
+.gsc-chart {
+  border: 1px solid var(--border, #d6dde6);
+  border-radius: 8px;
+  background: var(--card-bg, #fff);
+  padding: 10px 12px;
+}
+
+.gsc-chart-legend {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 11.5px;
+  color: var(--text, #1b222c);
+  margin-bottom: 6px;
+}
+
+.gsc-legend-item { display: inline-flex; align-items: center; gap: 5px; }
+.gsc-chart-note { margin-left: auto; }
+
+.gsc-swatch { width: 10px; height: 3px; border-radius: 2px; display: inline-block; }
+.gsc-swatch-impr { background: #8fb4e0; }
+.gsc-swatch-clicks { background: #2f6fed; }
+
+.gsc-chart-svg {
+  width: 100%;
+  height: 150px;
+  display: block;
+  overflow: visible;
+}
+
+.gsc-line { fill: none; stroke-width: 1.75; vector-effect: non-scaling-stroke; }
+.gsc-line-impr { stroke: #8fb4e0; }
+.gsc-line-clicks { stroke: #2f6fed; }
+
+.gsc-chart-axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10.5px;
+  color: var(--muted, #5b6472);
+  margin-top: 4px;
+}
+
+/* ---------- Split panels ---------- */
+
+.gsc-overview-split {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 12px;
+  min-width: 0;
+}
+
+.gsc-mini { min-width: 0; }
+
+.gsc-mini-title {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted, #5b6472);
+}
+
+.gsc-mini-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border, #d6dde6);
+  border-radius: 8px;
+  background: var(--card-bg, #fff);
+  overflow: hidden;
+}
+
+.gsc-mini-list li {
+  display: grid;
+  grid-template-columns: 1fr 56px 72px;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  border-bottom: 1px solid #f0f3f7;
+  min-width: 0;
+}
+
+.gsc-mini-list li:last-child { border-bottom: none; }
+
+.gsc-mini-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.gsc-mini-num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ---------- Metric table ---------- */
+
+.gsc-table-wrap {
+  border: 1px solid var(--border, #d6dde6);
+  border-radius: 8px;
+  background: var(--card-bg, #fff);
+  overflow: hidden;
+  min-width: 0;
+}
+
+.gsc-metric-table {
+  width: 100%;
+  border-collapse: collapse;
+  /* Fixed layout is what keeps a 300-char URL from widening the table past
+     its container and forcing the whole modal to scroll sideways. */
+  table-layout: fixed;
+  font-size: 12.5px;
+}
+
+.gsc-metric-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted, #5b6472);
+  background: var(--bg, #f5f7fa);
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border, #d6dde6);
+}
+
+.gsc-th-num { text-align: right; width: 96px; }
+.gsc-th-sortable { cursor: pointer; user-select: none; }
+.gsc-th-sortable:hover { color: var(--navy, #16345c); }
+.gsc-th-active { color: var(--accent, #2f6fed); }
+.gsc-sort-caret { font-size: 8px; margin-left: 3px; }
+
+.gsc-metric-table tbody td {
+  padding: 6px 10px;
+  border-bottom: 1px solid #f4f6f9;
+  vertical-align: middle;
+}
+
+.gsc-metric-table tbody tr:last-child td { border-bottom: none; }
+.gsc-metric-table tbody tr:hover { background: #f8fafd; }
+
+.gsc-cell-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.gsc-cell-label a { color: var(--blue, #1f6fb2); text-decoration: none; }
+.gsc-cell-label a:hover { text-decoration: underline; }
+
+.gsc-truncated { padding: 8px 10px; margin: 0; border-top: 1px solid #f0f3f7; }
+
+/* ---------- Indexing tab ---------- */
+
+.gsc-index-toolbar {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.gsc-verdict-cards { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.gsc-verdict-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 108px;
+  padding: 9px 12px;
+  border: 1px solid var(--border, #d6dde6);
+  border-radius: 8px;
+  background: var(--card-bg, #fff);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.gsc-verdict-card:hover { border-color: var(--accent, #2f6fed); }
+.gsc-verdict-active { border-width: 2px; padding: 8px 11px; }
+
+.gsc-verdict-count { font-size: 20px; font-weight: 700; line-height: 1.1; }
+
+.gsc-verdict-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted, #5b6472);
+}
+
+.gsc-verdict-card.gsc-verdict-pass .gsc-verdict-count { color: #2e8b57; }
+.gsc-verdict-card.gsc-verdict-pass.gsc-verdict-active { border-color: #2e8b57; background: #f2fbf5; }
+.gsc-verdict-card.gsc-verdict-fail .gsc-verdict-count { color: #b3261e; }
+.gsc-verdict-card.gsc-verdict-fail.gsc-verdict-active { border-color: #b3261e; background: #fdf3f2; }
+.gsc-verdict-card.gsc-verdict-neutral .gsc-verdict-count { color: #b3611a; }
+.gsc-verdict-card.gsc-verdict-neutral.gsc-verdict-active { border-color: #b3611a; background: #fffaf3; }
+.gsc-verdict-card.gsc-verdict-partial .gsc-verdict-count { color: var(--blue, #1f6fb2); }
+.gsc-verdict-card.gsc-verdict-partial.gsc-verdict-active { border-color: var(--blue, #1f6fb2); background: #f4f8fd; }
+
+.gsc-index-actions { display: flex; gap: 6px; margin-left: auto; align-items: center; }
+
+.gsc-verdict-chip {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 2px 7px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.gsc-verdict-chip.gsc-verdict-pass { background: #e6f4ea; color: #2e8b57; }
+.gsc-verdict-chip.gsc-verdict-fail { background: #fbe9e7; color: #b3261e; }
+.gsc-verdict-chip.gsc-verdict-neutral { background: #fdf1e6; color: #b3611a; }
+.gsc-verdict-chip.gsc-verdict-partial { background: #e4ecf8; color: var(--blue, #1f6fb2); }
+.gsc-verdict-chip.gsc-verdict-verdict_unspecified { background: #eef1f6; color: #5b6472; }
+
+.gsc-index-table th:nth-child(1), .gsc-index-table td:nth-child(1) { width: 32%; }
+.gsc-index-table th:nth-child(3), .gsc-index-table td:nth-child(3) { width: auto; }
+
+.gsc-index-table td { vertical-align: top; }
+
+.gsc-sub-note {
+  display: block;
+  font-size: 10.5px;
+  color: #b3611a;
+  margin-top: 2px;
+}
+
+.gsc-canonical-warn {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: #fdf1e6;
+  color: #b3611a;
+  cursor: help;
+}
+
+.gsc-canonical-none {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: #eef1f6;
+  color: #5b6472;
+  cursor: help;
+  white-space: nowrap;
+}
+
+/* ---------- Panel shell (host-agnostic) ---------- */
+
+.gsc-panel { display: flex; flex-direction: column; min-width: 0; }
+
+/* The property line and the date picker. Sits inside the panel rather than in
+   a host header, so the modal and the site page get the same controls without
+   either one re-implementing them. */
+.gsc-panel-bar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.gsc-panel-source { margin: 0; overflow-wrap: anywhere; }
+
+.gsc-panel-body { min-width: 0; }
+.gsc-range-note { color: var(--muted, #5b6472); margin: 0 0 8px; }
+
+/* ---------- Insight tabs (vitals / sitemaps / links / enhancements / mobile / security) ---------- */
+
+/* Source caption on the left, the tab's action (or view switcher) on the
+   right -- the same silhouette as .gsc-index-toolbar without inheriting its
+   verdict-card assumptions. */
+.gsc-tab-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.gsc-source-note { margin: 0; }
+
+/* Core Web Vitals chips -- same anatomy as .gsc-verdict-chip, but they carry
+   measured values, so no uppercase transform and slightly larger type. */
+.cwv-chip {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 4px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.cwv-chip-good { background: #e6f4ea; color: #2e8b57; }
+.cwv-chip-ni { background: #fdf1e6; color: #b3611a; }
+.cwv-chip-poor { background: #fbe9e7; color: #b3261e; }
+
+.gsc-cwv-legend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0;
+}
+
+/* Segmented view switcher (Links tab). */
+.gsc-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border, #d6dde6);
+  border-radius: 8px;
+  background: var(--bg, #f5f7fa);
+}
+
+.gsc-seg-btn {
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted, #5b6472);
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.gsc-seg-btn:hover { color: var(--navy, #16345c); }
+
+.gsc-seg-active {
+  background: var(--card-bg, #fff);
+  color: var(--navy, #16345c);
+  box-shadow: 0 1px 2px rgba(22, 52, 92, 0.12);
+}
+
+/* Coverage stat cards (Mobile, Enhancements). Slightly deeper than .gsc-stat:
+   these are the tab's headline numbers, not a row of totals. */
+.gsc-stat-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+}
+
+.gsc-stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 14px 16px;
+  border: 1px solid var(--border, #d6dde6);
+  border-radius: 10px;
+  background: var(--card-bg, #fff);
+  box-shadow: 0 1px 3px rgba(22, 52, 92, 0.06), 0 4px 12px rgba(22, 52, 92, 0.04);
+}
+
+.gsc-stat-card-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--navy, #16345c);
+  line-height: 1.1;
+}
+
+.gsc-stat-card-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted, #5b6472);
+}
+
+.gsc-stat-card-sub { font-size: 11px; color: var(--muted, #5b6472); }
+
+.gsc-stat-card-good .gsc-stat-card-value { color: #2e8b57; }
+.gsc-stat-card-warn .gsc-stat-card-value { color: #b3611a; }
+.gsc-stat-card-bad .gsc-stat-card-value { color: #b3261e; }
+
+/* Sitemap error/warning count badges. */
+.gsc-badge {
+  display: inline-block;
+  min-width: 20px;
+  text-align: center;
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.gsc-badge-error { background: #fbe9e7; color: #b3261e; }
+.gsc-badge-warn { background: #fdf1e6; color: #b3611a; }
+
+/* "sitemap index" / "pending" markers next to a sitemap path. */
+.gsc-flag-chip {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #e4ecf8;
+  color: var(--blue, #1f6fb2);
+  margin-left: 6px;
+  white-space: nowrap;
+}
+
+/* Stacked sample links inside an Enhancements table cell. */
+.gsc-sample-link {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--blue, #1f6fb2);
+  text-decoration: none;
+  font-size: 12px;
+}
+
+.gsc-sample-link:hover { text-decoration: underline; }
+
+/* Security status hero. One card, three moods. */
+.gsc-sec-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 18px 20px;
+  border: 1px solid var(--border, #d6dde6);
+  border-radius: 10px;
+  background: var(--card-bg, #fff);
+  box-shadow: 0 1px 3px rgba(22, 52, 92, 0.06);
+}
+
+.gsc-sec-status { font-size: 17px; font-weight: 700; }
+.gsc-sec-sub { font-size: 12.5px; color: var(--text, #1b222c); }
+
+.gsc-sec-clean { background: #f2fbf5; border-color: #bfe3cc; }
+.gsc-sec-clean .gsc-sec-status { color: #2e8b57; }
+
+.gsc-sec-flagged { background: #fdf3f2; border-color: #eec5c2; }
+.gsc-sec-flagged .gsc-sec-status { color: #b3261e; }
+
+.gsc-sec-unavailable { background: #f2f4f8; }
+.gsc-sec-unavailable .gsc-sec-status { color: var(--muted, #5b6472); }
+
+/* Outbound deep-link cards into the Search Console UI. */
+.gsc-sec-links {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.gsc-link-card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 13px 15px;
+  border: 1px solid var(--border, #d6dde6);
+  border-radius: 10px;
+  background: var(--card-bg, #fff);
+  text-decoration: none;
+  box-shadow: 0 1px 3px rgba(22, 52, 92, 0.06);
+  transition: border-color 0.12s ease;
+}
+
+.gsc-link-card:hover { border-color: var(--accent, #2f6fed); }
+
+.gsc-link-card-title { font-size: 13px; font-weight: 700; color: var(--navy, #16345c); }
+.gsc-link-card-sub { font-size: 11.5px; color: var(--muted, #5b6472); }
+
+/* Index coverage -- Google's "Why pages aren't indexed", rebuilt.
+   The Source chip is load-bearing rather than decorative: it is the only
+   thing telling the reader whether a number came from our crawl or from
+   Google, and those two carry very different authority. */
+.gsc-coverage-note { margin: 0 0 10px; }
+
+.gsc-coverage-table td { vertical-align: top; }
+
+.gsc-coverage-row { cursor: pointer; }
+.gsc-coverage-row:hover { background: var(--surface-hover, #f5f8fb); }
+
+.gsc-coverage-reason {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.gsc-coverage-caret {
+  display: inline-block;
+  width: 12px;
+  font-weight: 700;
+  color: var(--muted, #5b6472);
+  flex: none;
+}
+
+/* The plain-language explanation under each reason. Wraps, unlike the
+   single-line cells elsewhere in this table. */
+.gsc-coverage-detail {
+  display: block;
+  margin-top: 3px;
+  padding-left: 18px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--muted, #5b6472);
+  white-space: normal;
+}
+
+.gsc-source-chip {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 2px 7px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.gsc-source-chip-site { background: #e4ecf8; color: var(--blue, #1f6fb2); }
+.gsc-source-chip-google { background: #eef1f6; color: #5b6472; }
+
+.gsc-coverage-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.gsc-coverage-count-warn { color: #b3611a; }
+.gsc-coverage-count-good { color: #2e8b57; }
+.gsc-coverage-count-muted { color: var(--muted, #5b6472); }
+
+/* Not a zero. Styled unlike every count in the table so it cannot be
+   skim-read as "none found". */
+.gsc-coverage-pending {
+  font-style: italic;
+  white-space: nowrap;
+}
+
+.gsc-coverage-samples td {
+  background: var(--surface-alt, #f7f9fc);
+  padding-top: 6px;
+  padding-bottom: 8px;
+}

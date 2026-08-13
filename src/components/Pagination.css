@@ -1,0 +1,60 @@
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 2px 2px;
+}
+
+.pager-range { white-space: nowrap; }
+
+.pager-controls {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+
+.pager-btn {
+  min-width: 30px;
+  padding: 5px 8px;
+  border: 1px solid var(--border, #d6dde6);
+  border-radius: 6px;
+  background: var(--card-bg, #fff);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text, #1b222c);
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+
+.pager-btn:hover:not(:disabled) { border-color: var(--accent, #2f6fed); color: var(--navy, #16345c); }
+
+.pager-btn:disabled { opacity: 0.45; cursor: default; }
+
+.pager-btn-active {
+  background: var(--accent, #2f6fed);
+  border-color: var(--accent, #2f6fed);
+  color: #fff;
+}
+
+/* Active page stays legible while a fetch is in flight -- the button is
+   disabled during load, and the default 0.45 opacity made the one number you
+   need to read the hardest one to see. */
+.pager-btn-active:disabled { opacity: 0.85; }
+
+.pager-gap { padding: 0 2px; color: var(--muted, #5b6472); }
+
+.pager-size {
+  margin-left: 6px;
+  padding: 5px 6px;
+  border: 1px solid var(--border, #d6dde6);
+  border-radius: 6px;
+  background: var(--card-bg, #fff);
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--text, #1b222c);
+  cursor: pointer;
+}

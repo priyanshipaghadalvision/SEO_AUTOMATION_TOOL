@@ -55,7 +55,7 @@ export class GscApiError extends Error {
   }
 }
 
-async function apiFetch<T>(userId: string, path: string, init?: RequestInit): Promise<T> {
+export async function apiFetch<T>(userId: string, path: string, init?: RequestInit): Promise<T> {
   let lastError: GscApiError | null = null;
   // URL Inspection lives on a different base path (/v1) than Search
   // Analytics (/webmasters/v3), so absolute URLs pass through untouched.

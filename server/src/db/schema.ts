@@ -696,3 +696,108 @@ export const auditEvents = pgTable(
   },
   (table) => [index("audit_events_entity_idx").on(table.entityType, table.entityId)],
 );
+
+/**
+ * Sitemaps as Search Console reports them, one row per (property, path).
+ *
+ * A re-sync upserts on that pair, and paths Google stops returning are kept
+ * rather than deleted -- whether to show stale entries is a display decision,
+ * not a storage one. `contents` mirrors the API's per-content-type counts;
+ * note Google has largely stopped populating `indexed`, so 0 there means
+ * "unreported", not "nothing indexed".
+ */
+export const gscSitemaps = pgTable(
+  "gsc_sitemaps",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    propertyId: uuid("property_id")
+      .notNull()
+      .references(() => gscProperties.id, { onDelete: "cascade" }),
+    /** The sitemap URL exactly as registered in Search Console. */
+    path: text("path").notNull(),
+    lastSubmitted: timestamp("last_submitted", { withTimezone: true }),
+    lastDownloaded: timestamp("last_downloaded", { withTimezone: true }),
+    /** True while Google has yet to process a freshly submitted sitemap. */
+    isPending: boolean("is_pending").notNull().default(false),
+    /** True for a sitemap index file that points at child sitemaps. */
+    isSitemapsIndex: boolean("is_sitemaps_index").notNull().default(false),
+    warnings: integer("warnings").notNull().default(0),
+    errors: integer("errors").notNull().default(0),
+    /** Per-content-type counts (web, image, ...), straight from the API. */
+    contents: jsonb("contents").$type<Array<{ type: string; submitted: number; indexed: number }>>(),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("gsc_sitemaps_unique_idx").on(table.propertyId, table.path),
+    index("gsc_sitemaps_property_id_idx").on(table.propertyId),
+  ],
+);
+
+/**
+ * Core Web Vitals per URL, from PageSpeed Insights v5 -- CrUX field data
+ * where Google has it, a Lighthouse lab run otherwise.
+ *
+ * `source` records which one actually produced the stored numbers, since a
+ * lab LCP and a field LCP are not comparable and the UI must say which it is
+ * showing. INP only exists in field data (a lab run has no user input), so
+ * `inpMs` is always null when source is "lab". One current row per
+ * (website, url, strategy): a re-run upserts rather than keeping history --
+ * this answers "how is the page doing now", not "how has it trended".
+ */
+export const webVitals = pgTable(
+  "web_vitals",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    websiteId: uuid("website_id")
+      .notNull()
+      .references(() => websites.id, { onDelete: "cascade" }),
+    url: text("url").notNull(),
+    /** "mobile" | "desktop" -- which emulation PSI ran with. */
+    strategy: text("strategy").notNull(),
+    /** "field" | "lab" | "none" -- where the metrics came from. */
+    source: text("source").notNull(),
+    /** Lighthouse performance score 0-100; null when no lab run happened. */
+    performanceScore: integer("performance_score"),
+    lcpMs: integer("lcp_ms"),
+    inpMs: integer("inp_ms"),
+    cls: real("cls"),
+    fcpMs: integer("fcp_ms"),
+    ttfbMs: integer("ttfb_ms"),
+    /** Google's per-metric verdicts, e.g. { LCP: "FAST" }. */
+    categories: jsonb("categories").$type<Record<string, string>>(),
+    /** Google's overall_category: "FAST" | "AVERAGE" | "SLOW"; null in lab. */
+    overall: text("overall"),
+    collectedAt: timestamp("collected_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("web_vitals_unique_idx").on(table.websiteId, table.url, table.strategy),
+    index("web_vitals_website_id_idx").on(table.websiteId),
+  ],
+);
+
+/**
+ * Latest Safe Browsing verdict for a site -- a status, not a log.
+ *
+ * One row per website (unique on website_id), UPSERTed by every check: the
+ * question this answers is "is the site flagged right now", and history would
+ * only blur that. `status` is "clean" | "flagged" | "unavailable" -- the last
+ * is the honest answer when no GOOGLE_API_KEY is configured, so the UI never
+ * shows an unchecked site as safe. `threats` is [] when clean.
+ */
+export const securityChecks = pgTable(
+  "security_checks",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    websiteId: uuid("website_id")
+      .notNull()
+      .references(() => websites.id, { onDelete: "cascade" }),
+    status: text("status").notNull(),
+    /** Safe Browsing matches: threatType + the specific URL flagged. */
+    threats: jsonb("threats").$type<Array<{ threatType: string; url: string }>>(),
+    checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("security_checks_unique_idx").on(table.websiteId),
+    index("security_checks_website_id_idx").on(table.websiteId),
+  ],
+);

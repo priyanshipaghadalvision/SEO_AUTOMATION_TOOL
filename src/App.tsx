@@ -15,7 +15,7 @@ import {
   redetectPlatform,
 } from "./api/client";
 import { AuthScreen } from "./components/AuthScreen";
-import { CrawlPagesModal } from "./components/CrawlPagesModal";
+import { SitePage } from "./components/SitePage";
 import { GscPanel } from "./components/GscPanel";
 import {
   ChevronDownIcon,
@@ -82,14 +82,86 @@ function Dashboard({ user, onSignedOut }: { user: User; onSignedOut: () => void 
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [redetectingId, setRedetectingId] = useState<string | null>(null);
-  // websiteId travels alongside the crawl: the merged URL view spans a whole
-  // site rather than a single crawl, so it needs the parent id too.
+  // The site view is a route, not an overlay. websiteId travels with it
+  // because the merged URL view spans a whole site, not a single crawl.
   const [viewingCrawl, setViewingCrawl] = useState<{
     id: string;
     websiteId: string;
     domain: string;
     crawl: Crawl;
   } | null>(null);
+
+  /**
+   * Routing without a router.
+   *
+   * Opening the site view pushes /site/<crawlId> so the URL reflects where
+   * you are, the browser Back button works, and the view survives nothing
+   * more than a stray click -- all things a modal gave up. A full router is
+   * not yet worth a dependency for two states, but this keeps the door open:
+   * the history entries are already real URLs.
+   */
+  function openSite(next: { id: string; websiteId: string; domain: string; crawl: Crawl }) {
+    setViewingCrawl(next);
+    window.history.pushState({ crawlId: next.id }, "", `/site/${next.id}`);
+    window.scrollTo(0, 0);
+  }
+
+  function closeSite() {
+    // Prefer going back so we don't pile up history entries; if this view was
+    // entered directly (deep link, refresh), replace instead.
+    if (window.history.state?.crawlId) window.history.back();
+    else {
+      setViewingCrawl(null);
+      window.history.replaceState({}, "", "/");
+    }
+  }
+
+  useEffect(() => {
+    function onPop() {
+      // Back/forward is the single source of truth for which view is showing.
+      if (!window.location.pathname.startsWith("/site/")) setViewingCrawl(null);
+    }
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  /**
+   * Restores the site view from the URL on a cold load.
+   *
+   * Without this, /site/<id> renders the dashboard after a refresh or when
+   * the link is shared -- which would make it a page in appearance only. The
+   * crawl carries its websiteId, and the domain comes from the already-loaded
+   * website list, so this costs one request.
+   */
+  useEffect(() => {
+    const match = window.location.pathname.match(/^\/site\/([0-9a-f-]{36})$/i);
+    if (!match || viewingCrawl || websites.length === 0) return;
+
+    let cancelled = false;
+    getCrawl(match[1] as string)
+      .then(({ crawl }) => {
+        // Superseded runs must bail WITHOUT touching history. Folding this
+        // into the not-found branch meant React's double-invoked effect
+        // cancelled its first pass and reset the URL to "/", so a deep link
+        // rendered the right page under the wrong address.
+        if (cancelled) return;
+
+        const site = websites.find((w) => w.id === crawl.websiteId);
+        // An unknown or unowned crawl id must not leave a dead URL sitting
+        // in the bar pretending a page exists.
+        if (!site) {
+          window.history.replaceState({}, "", "/");
+          return;
+        }
+        setViewingCrawl({ id: crawl.id, websiteId: site.id, domain: site.domain, crawl });
+      })
+      .catch(() => {
+        if (!cancelled) window.history.replaceState({}, "", "/");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [websites, viewingCrawl]);
 
   async function refreshWebsites() {
     setLoading(true);
@@ -285,6 +357,23 @@ function Dashboard({ user, onSignedOut }: { user: User; onSignedOut: () => void 
       console.error("Logout request failed", err);
     }
     onSignedOut();
+  }
+
+  // A route, not an overlay: the dashboard is unmounted while the site view
+  // is open. Rendering both and stacking them was the modal behaviour -- it
+  // kept the dashboard scrolling behind, doubled the DOM, and left the
+  // dashboard's 2-second crawl polling running under a page that doesn't
+  // show it.
+  if (viewingCrawl) {
+    return (
+      <SitePage
+        crawlId={viewingCrawl.id}
+        websiteId={viewingCrawl.websiteId}
+        domain={viewingCrawl.domain}
+        crawl={viewingCrawl.crawl}
+        onBack={closeSite}
+      />
+    );
   }
 
   return (
@@ -609,7 +698,7 @@ function Dashboard({ user, onSignedOut }: { user: User; onSignedOut: () => void 
                                                     className="icon-button"
                                                     title="View crawled pages"
                                                     aria-label={`View crawled pages for ${website.domain}`}
-                                                    onClick={() => setViewingCrawl({ id: crawl.id, websiteId: website.id, domain: website.domain, crawl })}
+                                                    onClick={() => openSite({ id: crawl.id, websiteId: website.id, domain: website.domain, crawl })}
                                                   >
                                                     <EyeIcon />
                                                   </button>
@@ -636,15 +725,6 @@ function Dashboard({ user, onSignedOut }: { user: User; onSignedOut: () => void 
         </section>
       </main>
 
-      {viewingCrawl && (
-        <CrawlPagesModal
-          crawlId={viewingCrawl.id}
-          websiteId={viewingCrawl.websiteId}
-          domain={viewingCrawl.domain}
-          crawl={viewingCrawl.crawl}
-          onClose={() => setViewingCrawl(null)}
-        />
-      )}
     </div>
   );
 }

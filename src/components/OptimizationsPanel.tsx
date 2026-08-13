@@ -7,6 +7,7 @@ import type {
 } from "../api/client";
 import { generateCrawlOptimizations, getCrawlOptimizations, setOptimizationStatus } from "../api/client";
 import { SpinnerIcon } from "./icons";
+import { Pagination } from "./Pagination";
 
 /** Display order: highest-leverage, lowest-effort fixes first. */
 const ACTION_ORDER: OptimizationAction[] = [
@@ -61,7 +62,16 @@ const FILTERS: Array<{ key: OptimizationStatus | "all"; label: string }> = [
 
 export function OptimizationsPanel({ crawlId }: { crawlId: string }) {
   const [items, setItems] = useState<Optimization[]>([]);
-  const [truncated, setTruncated] = useState(false);
+  /** Server rollups: these cover every proposal, not just the loaded page. */
+  const [counts, setCounts] = useState<Record<OptimizationStatus, number>>({
+    pending: 0,
+    approved: 0,
+    rejected: 0,
+    applied: 0,
+  });
+  const [matched, setMatched] = useState(0);
+  const [offset, setOffset] = useState(0);
+  const [pageSize, setPageSize] = useState(100);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,21 +81,38 @@ export function OptimizationsPanel({ crawlId }: { crawlId: string }) {
   // Ids currently being written, so a row can't be double-submitted.
   const [saving, setSaving] = useState<Set<string>>(new Set());
 
-  const load = useCallback(async () => {
-    const res = await getCrawlOptimizations(crawlId);
+  /** Folds a response into state; shared by the effect and the reload path. */
+  const apply = useCallback((res: Awaited<ReturnType<typeof getCrawlOptimizations>>) => {
     setItems(res.optimizations);
-    setTruncated(res.truncated);
-  }, [crawlId]);
+    setMatched(res.matched);
+    const next: Record<OptimizationStatus, number> = { pending: 0, approved: 0, rejected: 0, applied: 0 };
+    for (const r of res.byStatus) next[r.status] = r.count;
+    setCounts(next);
+  }, []);
+
+  const load = useCallback(async () => {
+    apply(await getCrawlOptimizations(crawlId, {
+      status: filter === "all" ? undefined : filter,
+      limit: pageSize,
+      offset,
+    }));
+  }, [crawlId, filter, pageSize, offset, apply]);
+
+  // Switching filters restarts paging -- page 12 of "All" is past the end of
+  // a 40-proposal "Rejected" list.
+  useEffect(() => setOffset(0), [crawlId, filter]);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    getCrawlOptimizations(crawlId)
+    getCrawlOptimizations(crawlId, {
+      status: filter === "all" ? undefined : filter,
+      limit: pageSize,
+      offset,
+    })
       .then((res) => {
-        if (cancelled) return;
-        setItems(res.optimizations);
-        setTruncated(res.truncated);
+        if (!cancelled) apply(res);
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load optimizations.");
@@ -96,7 +123,7 @@ export function OptimizationsPanel({ crawlId }: { crawlId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [crawlId]);
+  }, [crawlId, filter, pageSize, offset, apply]);
 
   async function handleGenerate() {
     setGenerating(true);
@@ -131,16 +158,15 @@ export function OptimizationsPanel({ crawlId }: { crawlId: string }) {
     }
   }
 
-  const counts = useMemo(() => {
-    const c: Record<OptimizationStatus, number> = { pending: 0, approved: 0, rejected: 0, applied: 0 };
-    for (const o of items) c[o.status] += 1;
-    return c;
-  }, [items]);
+  const total = counts.pending + counts.approved + counts.rejected + counts.applied;
 
-  const visible = useMemo(
-    () => (filter === "all" ? items : items.filter((o) => o.status === filter)),
-    [items, filter],
-  );
+  /*
+   * The server already applied the status filter, so the loaded page IS the
+   * visible set. Re-filtering here would blank the list the moment an
+   * optimistic review moved a row out of the active status -- the row would
+   * vanish and the pager would still count it.
+   */
+  const visible = items;
 
   const groups = useMemo(() => {
     const byAction = new Map<OptimizationAction, Optimization[]>();
@@ -172,7 +198,7 @@ export function OptimizationsPanel({ crawlId }: { crawlId: string }) {
             >
               {f.label}
               <span className="opt-filter-count">
-                {f.key === "all" ? items.length : counts[f.key]}
+                {f.key === "all" ? total : counts[f.key]}
               </span>
             </button>
           ))}
@@ -188,7 +214,7 @@ export function OptimizationsPanel({ crawlId }: { crawlId: string }) {
             <>
               <SpinnerIcon /> Generating&hellip;
             </>
-          ) : items.length === 0 ? (
+          ) : total === 0 ? (
             "Generate fixes"
           ) : (
             "Regenerate"
@@ -198,18 +224,14 @@ export function OptimizationsPanel({ crawlId }: { crawlId: string }) {
 
       {error && <p className="error-text">{error}</p>}
       {run && <RunSummary run={run} />}
-      {truncated && (
-        <p className="muted small">Showing the first 2,000 proposals; counts above cover them all.</p>
-      )}
-
-      {items.length === 0 && !generating && (
+      {total === 0 && !generating && (
         <p className="muted small opt-empty">
           No fixes generated yet. &ldquo;Generate fixes&rdquo; turns this crawl&rsquo;s auto-fixable issues into
           concrete, copy-pasteable changes. Nothing is applied to your site — every proposal waits for your review.
         </p>
       )}
 
-      {items.length > 0 && visible.length === 0 && (
+      {total > 0 && visible.length === 0 && (
         <p className="muted small opt-empty">Nothing in &ldquo;{STATUS_LABEL[filter as OptimizationStatus] ?? "All"}&rdquo;.</p>
       )}
 
@@ -244,6 +266,21 @@ export function OptimizationsPanel({ crawlId }: { crawlId: string }) {
           );
         })}
       </ul>
+
+      {matched > 0 && (
+        <Pagination
+          total={matched}
+          offset={offset}
+          pageSize={pageSize}
+          busy={loading}
+          noun="fix"
+          plural="fixes"
+          onChange={(next) => {
+            setOffset(next.offset);
+            setPageSize(next.pageSize);
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Issue, IssueSeverity, IssueTypeSummary } from "../api/client";
 import { analyzeCrawl, getCrawlIssues } from "../api/client";
 import { SpinnerIcon } from "./icons";
@@ -11,7 +11,10 @@ const SEVERITY_LABEL: Record<IssueSeverity, string> = {
   notice: "Notice",
 };
 
-/** Turns "title.too_long" into "Title too long". */
+/** Instances fetched per request when a type is expanded. */
+const PAGE_SIZE = 100;
+
+/** Turns "title.too_long" into "Title — too long". */
 function humanType(type: string) {
   const [, ...rest] = type.split(".");
   const tail = rest.join(" ").replace(/_/g, " ");
@@ -19,49 +22,112 @@ function humanType(type: string) {
   return `${head.charAt(0).toUpperCase()}${head.slice(1)} — ${tail}`;
 }
 
+/** Instances loaded so far for one expanded issue type. */
+interface TypeState {
+  rows: Issue[];
+  total: number;
+  hasMore: boolean;
+  loading: boolean;
+  error: string | null;
+}
+
 export function IssuesPanel({ crawlId }: { crawlId: string }) {
-  const [data, setData] = useState<{ issues: Issue[]; byType: IssueTypeSummary[]; truncated: boolean } | null>(null);
+  const [byType, setByType] = useState<IssueTypeSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reanalyzing, setReanalyzing] = useState(false);
   const [severityFilter, setSeverityFilter] = useState<IssueSeverity | "all">("all");
   const [openType, setOpenType] = useState<string | null>(null);
+  const [instances, setInstances] = useState<Record<string, TypeState>>({});
 
-  async function load() {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await getCrawlIssues(crawlId);
-      setData({ issues: res.issues, byType: res.byType, truncated: res.truncated });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load issues.");
-    } finally {
-      setLoading(false);
-    }
-  }
+  /**
+   * Only the rollup is loaded up front.
+   *
+   * The old design fetched 2,000 issues in bulk and filtered them client-side,
+   * which meant any type whose instances fell outside that window could only
+   * say "not loaded". Fetching per type on expand has no such ceiling: each
+   * type pages independently, however many issues the crawl produced.
+   */
+  const loadSummary = useCallback(async () => {
+    const res = await getCrawlIssues(crawlId, { limit: 1 });
+    setByType(res.byType);
+  }, [crawlId]);
 
   useEffect(() => {
     let cancelled = false;
-    getCrawlIssues(crawlId)
+    setLoading(true);
+    setError(null);
+    getCrawlIssues(crawlId, { limit: 1 })
       .then((res) => {
-        if (!cancelled) setData({ issues: res.issues, byType: res.byType, truncated: res.truncated });
+        if (!cancelled) setByType(res.byType);
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load issues.");
       })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+      .finally(() => setLoading(false));
     return () => {
       cancelled = true;
     };
   }, [crawlId]);
 
+  async function loadInstances(type: string, append: boolean) {
+    const current = instances[type];
+    const offset = append ? (current?.rows.length ?? 0) : 0;
+
+    setInstances((prev) => ({
+      ...prev,
+      [type]: {
+        rows: append ? (current?.rows ?? []) : [],
+        total: current?.total ?? 0,
+        hasMore: current?.hasMore ?? false,
+        loading: true,
+        error: null,
+      },
+    }));
+
+    try {
+      const res = await getCrawlIssues(crawlId, { type, limit: PAGE_SIZE, offset });
+      setInstances((prev) => ({
+        ...prev,
+        [type]: {
+          rows: [...(append ? (prev[type]?.rows ?? []) : []), ...res.issues],
+          total: res.matched,
+          hasMore: res.hasMore,
+          loading: false,
+          error: null,
+        },
+      }));
+    } catch (err) {
+      setInstances((prev) => ({
+        ...prev,
+        [type]: {
+          rows: prev[type]?.rows ?? [],
+          total: prev[type]?.total ?? 0,
+          hasMore: false,
+          loading: false,
+          error: err instanceof Error ? err.message : "Failed to load instances.",
+        },
+      }));
+    }
+  }
+
+  function toggleType(type: string) {
+    if (openType === type) {
+      setOpenType(null);
+      return;
+    }
+    setOpenType(type);
+    // Cached from a previous expand -- don't re-fetch.
+    if (!instances[type]) loadInstances(type, false);
+  }
+
   async function handleReanalyze() {
     setReanalyzing(true);
     try {
       await analyzeCrawl(crawlId);
-      await load();
+      setInstances({}); // Stale after re-analysis: issue ids are recreated.
+      setOpenType(null);
+      await loadSummary();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Analysis failed.");
     } finally {
@@ -71,26 +137,18 @@ export function IssuesPanel({ crawlId }: { crawlId: string }) {
 
   const counts = useMemo(() => {
     const c: Record<IssueSeverity, number> = { critical: 0, warning: 0, notice: 0 };
-    for (const t of data?.byType ?? []) c[t.severity] += t.count;
+    for (const t of byType) c[t.severity] += t.count;
     return c;
-  }, [data]);
+  }, [byType]);
 
   const total = counts.critical + counts.warning + counts.notice;
 
   const visibleTypes = useMemo(() => {
-    const types = data?.byType ?? [];
-    const filtered = severityFilter === "all" ? types : types.filter((t) => t.severity === severityFilter);
-    // Critical first, then by how many pages are affected.
+    const filtered = severityFilter === "all" ? byType : byType.filter((t) => t.severity === severityFilter);
     return [...filtered].sort(
-      (a, b) =>
-        SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity) || b.count - a.count,
+      (a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity) || b.count - a.count,
     );
-  }, [data, severityFilter]);
-
-  const issuesForType = useMemo(() => {
-    if (!openType || !data) return [];
-    return data.issues.filter((i) => i.type === openType);
-  }, [openType, data]);
+  }, [byType, severityFilter]);
 
   if (loading) return <p className="muted small">Analysing&hellip;</p>;
   if (error) return <p className="error-text">{error}</p>;
@@ -125,7 +183,7 @@ export function IssuesPanel({ crawlId }: { crawlId: string }) {
             className={`sev-card sev-card-${sev}${severityFilter === sev ? " sev-card-active" : ""}`}
             onClick={() => setSeverityFilter(severityFilter === sev ? "all" : sev)}
           >
-            <span className="sev-count">{counts[sev]}</span>
+            <span className="sev-count">{counts[sev].toLocaleString()}</span>
             <span className="sev-label">{SEVERITY_LABEL[sev]}</span>
           </button>
         ))}
@@ -146,27 +204,26 @@ export function IssuesPanel({ crawlId }: { crawlId: string }) {
         </button>
       </div>
 
-      {data?.truncated && (
-        <p className="muted small">Showing the first 2,000 issues; totals above cover the full crawl.</p>
-      )}
-
       <ul className="issue-type-list">
         {visibleTypes.map((t) => {
           const open = openType === t.type;
+          const state = instances[t.type];
           return (
             <li key={t.type} className="issue-type">
-              <button type="button" className="issue-type-head" onClick={() => setOpenType(open ? null : t.type)}>
+              <button type="button" className="issue-type-head" onClick={() => toggleType(t.type)}>
                 <span className={`sev-dot sev-dot-${t.severity}`} />
                 <span className="issue-type-name">{humanType(t.type)}</span>
                 {t.autoFixable && <span className="flag-chip auto-fix-chip">auto-fixable</span>}
                 <span className={`risk-chip risk-${t.risk}`}>{t.risk} risk</span>
-                <span className="issue-type-count">{t.count}</span>
+                <span className="issue-type-count">{t.count.toLocaleString()}</span>
                 <span className="pages-expand-chevron">{open ? "−" : "+"}</span>
               </button>
 
               {open && (
                 <ul className="issue-instances">
-                  {issuesForType.slice(0, 50).map((i) => (
+                  {state?.error && <li className="error-text small">{state.error}</li>}
+
+                  {state?.rows.map((i) => (
                     <li key={i.id}>
                       <span className="issue-msg">{i.message}</span>
                       {i.url && (
@@ -177,12 +234,27 @@ export function IssuesPanel({ crawlId }: { crawlId: string }) {
                       <IssueEvidence issue={i} />
                     </li>
                   ))}
-                  {issuesForType.length > 50 && (
-                    <li className="muted small">+{issuesForType.length - 50} more affected pages</li>
-                  )}
-                  {issuesForType.length === 0 && (
+
+                  {state?.loading && (
                     <li className="muted small">
-                      Instances not loaded (beyond the 2,000-issue fetch limit).
+                      <SpinnerIcon /> Loading instances&hellip;
+                    </li>
+                  )}
+
+                  {state && !state.loading && (
+                    <li className="issue-more">
+                      <span className="muted small">
+                        Showing {state.rows.length.toLocaleString()} of {state.total.toLocaleString()}
+                      </span>
+                      {state.hasMore && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => loadInstances(t.type, true)}
+                        >
+                          Load {Math.min(PAGE_SIZE, state.total - state.rows.length)} more
+                        </button>
+                      )}
                     </li>
                   )}
                 </ul>

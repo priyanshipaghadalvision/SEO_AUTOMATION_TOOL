@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { gscBreakdowns, gscConnections, gscPageMetrics, gscProperties, gscUrlInspections, websites } from "../db/schema.js";
+import { gscBreakdowns, gscConnections, gscPageMetrics, gscProperties, gscSitemaps, gscUrlInspections, websites } from "../db/schema.js";
 import { canReadData, listSites } from "../gsc/client.js";
 import {
   GscConnectionExpiredError,
@@ -18,6 +18,11 @@ import { ensureRangeData } from "../gsc/ensureRange.js";
 import { getMergedUrls } from "../gsc/mergedUrls.js";
 import type { Bucket } from "../gsc/mergedUrls.js";
 import { matchesDomain, propertyTypeOf, syncPropertyMetrics } from "../gsc/syncMetrics.js";
+import { syncSitemaps } from "../gsc/sitemapsSync.js";
+import { getWebVitalsRows, runWebVitals } from "../gsc/webVitals.js";
+import { getEnhancements, getLinkInsights, getMobileUsability } from "../gsc/siteInsights.js";
+import { getCoverage } from "../gsc/coverage.js";
+import { checkSite, getSecurityStatus } from "../gsc/safeBrowsing.js";
 import { logAuditEvent } from "../lib/audit.js";
 
 /** How long a live range pull may block the request before we serve stored data. */
@@ -550,7 +555,10 @@ gscRouter.get("/urls/:websiteId", async (req, res) => {
   const bucket = BUCKETS.includes(req.query.bucket as Bucket) ? (req.query.bucket as Bucket) : undefined;
   const search = typeof req.query.search === "string" && req.query.search.trim() ? req.query.search.trim() : undefined;
 
-  const result = await getMergedUrls(websiteId, prop?.id ?? null, range, { bucket, search });
+  const limit = Number(req.query.limit) || undefined;
+  const offset = Math.max(0, Number(req.query.offset) || 0);
+
+  const result = await getMergedUrls(websiteId, prop?.id ?? null, range, { bucket, search, limit, offset });
   res.json({ ...result, range, gscLinked: Boolean(prop), siteUrl: prop?.siteUrl ?? null });
 });
 
@@ -562,4 +570,237 @@ gscRouter.delete("/connection", async (req, res) => {
     eventType: "gsc.disconnected",
   });
   res.json({ disconnected: true });
+});
+
+/**
+ * True when the website exists and belongs to this user.
+ *
+ * Same shape as the inline lookups above: another user's websiteId matches
+ * nothing, so the caller reports 404 -- indistinguishable from an id that
+ * doesn't exist, which is the point.
+ */
+async function ownsWebsite(userId: string, websiteId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: websites.id })
+    .from(websites)
+    .where(and(eq(websites.id, websiteId), eq(websites.userId, userId)));
+  return Boolean(row);
+}
+
+/**
+ * Deep links into the Search Console UI for the two surfaces Google exposes
+ * no API for. No resource parameter: GSC ignores unknown ones anyway, and the
+ * user picks their property once inside.
+ */
+const GSC_UI_LINKS = {
+  manualActions: "https://search.google.com/search-console/manual-actions",
+  securityIssues: "https://search.google.com/search-console/security-issues",
+} as const;
+
+/** Pulls the sitemap list from Search Console into the local table. */
+gscRouter.post("/sitemaps/:websiteId/sync", async (req, res) => {
+  const userId = req.userId as string;
+  if (!(await ownsWebsite(userId, req.params.websiteId as string))) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  await withGoogle(res, async () => {
+    const result = await syncSitemaps(userId, req.params.websiteId as string);
+    res.json(result);
+  });
+});
+
+/**
+ * Stored sitemaps for a website's linked property.
+ *
+ * An unlinked site answers `gscLinked: false` rather than 404: "no Search
+ * Console link" is a state the tab renders (with a link prompt), not a
+ * missing resource.
+ */
+gscRouter.get("/sitemaps/:websiteId", async (req, res) => {
+  const userId = req.userId as string;
+  const websiteId = req.params.websiteId as string;
+  if (!(await ownsWebsite(userId, websiteId))) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+
+  const [prop] = await db
+    .select({ id: gscProperties.id })
+    .from(gscProperties)
+    .where(eq(gscProperties.websiteId, websiteId));
+  if (!prop) {
+    res.json({ gscLinked: false, sitemaps: [], fetchedAt: null });
+    return;
+  }
+
+  const rows = await db
+    .select()
+    .from(gscSitemaps)
+    .where(eq(gscSitemaps.propertyId, prop.id))
+    .orderBy(gscSitemaps.path);
+
+  // The newest fetch stamp tells the tab how stale the whole list is; rows
+  // themselves are kept across syncs even when Google drops a path.
+  let fetchedAt: Date | null = null;
+  for (const r of rows) {
+    if (fetchedAt === null || r.fetchedAt > fetchedAt) fetchedAt = r.fetchedAt;
+  }
+
+  res.json({
+    gscLinked: true,
+    sitemaps: rows.map((r) => ({
+      path: r.path,
+      lastSubmitted: r.lastSubmitted?.toISOString() ?? null,
+      lastDownloaded: r.lastDownloaded?.toISOString() ?? null,
+      isPending: r.isPending,
+      isSitemapsIndex: r.isSitemapsIndex,
+      warnings: r.warnings,
+      errors: r.errors,
+      contents: r.contents ?? [],
+    })),
+    fetchedAt: fetchedAt?.toISOString() ?? null,
+  });
+});
+
+/**
+ * Runs PageSpeed Insights against the site's top pages.
+ *
+ * The limit is capped at 25, not the inspect route's 2,000: each PSI call is
+ * a full Lighthouse run on Google's side, and the unkeyed quota is small
+ * enough that a big batch would mostly report `stoppedReason`.
+ */
+gscRouter.post("/cwv/:websiteId/run", async (req, res) => {
+  const userId = req.userId as string;
+  const websiteId = req.params.websiteId as string;
+  if (!(await ownsWebsite(userId, websiteId))) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+
+  const body = req.body as { limit?: number; strategy?: string } | undefined;
+  const requested = Number(body?.limit);
+  const limit = Number.isFinite(requested) ? Math.min(25, Math.max(1, requested)) : 10;
+  const strategy = body?.strategy === "desktop" ? "desktop" : "mobile";
+
+  const result = await runWebVitals(websiteId, { limit, strategy });
+  res.json(result);
+});
+
+/** Stored Core Web Vitals for one strategy, worst LCP first. */
+gscRouter.get("/cwv/:websiteId", async (req, res) => {
+  const userId = req.userId as string;
+  const websiteId = req.params.websiteId as string;
+  if (!(await ownsWebsite(userId, websiteId))) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+
+  const strategy = req.query.strategy === "desktop" ? "desktop" : "mobile";
+  const rows = await getWebVitalsRows(websiteId, strategy);
+  // ISO timestamps compare correctly as strings, so the max is the newest.
+  const collectedAt = rows.reduce<string | null>(
+    (max, r) => (max === null || r.collectedAt > max ? r.collectedAt : max),
+    null,
+  );
+  res.json({ rows, collectedAt });
+});
+
+const LINK_VIEWS = ["pages", "domains", "orphans"] as const;
+
+/**
+ * Link-graph views from the latest completed crawl. Not Search Console data
+ * -- Google exposes no links API -- so this works with no property linked,
+ * and a site with no completed crawl gets empty rows, not an error.
+ */
+gscRouter.get("/links/:websiteId", async (req, res) => {
+  const userId = req.userId as string;
+  const websiteId = req.params.websiteId as string;
+  if (!(await ownsWebsite(userId, websiteId))) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+
+  // Unknown views fall back to the default rather than 400ing, matching how
+  // `/urls` treats an unknown bucket.
+  const view = LINK_VIEWS.includes(req.query.view as (typeof LINK_VIEWS)[number])
+    ? (req.query.view as (typeof LINK_VIEWS)[number])
+    : "pages";
+  const requestedLimit = Number(req.query.limit);
+  const limit = Number.isFinite(requestedLimit) ? Math.min(500, Math.max(1, requestedLimit)) : 100;
+  const offset = Math.max(0, Number(req.query.offset) || 0);
+
+  const result = await getLinkInsights(websiteId, { view, limit, offset });
+  res.json(result);
+});
+
+/** Structured-data coverage from the latest completed crawl. */
+gscRouter.get("/enhancements/:websiteId", async (req, res) => {
+  const userId = req.userId as string;
+  const websiteId = req.params.websiteId as string;
+  if (!(await ownsWebsite(userId, websiteId))) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  res.json(await getEnhancements(websiteId));
+});
+
+/**
+ * Mobile signals: crawl-derived viewport coverage plus the stored mobile
+ * Core Web Vitals. Google retired the Mobile Usability API (Dec 2023), so
+ * this is the honest substitute, and the tab's caption says so.
+ */
+gscRouter.get("/mobile/:websiteId", async (req, res) => {
+  const userId = req.userId as string;
+  const websiteId = req.params.websiteId as string;
+  if (!(await ownsWebsite(userId, websiteId))) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  const [usability, cwv] = await Promise.all([getMobileUsability(websiteId), getWebVitalsRows(websiteId, "mobile")]);
+  res.json({ ...usability, cwv });
+});
+
+/** Latest Safe Browsing verdict, plus links to the GSC surfaces with no API. */
+gscRouter.get("/security/:websiteId", async (req, res) => {
+  const userId = req.userId as string;
+  const websiteId = req.params.websiteId as string;
+  if (!(await ownsWebsite(userId, websiteId))) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  const status = await getSecurityStatus(websiteId);
+  res.json({ ...status, gscLinks: GSC_UI_LINKS });
+});
+
+/** Runs a fresh Safe Browsing check and returns the new verdict. */
+gscRouter.post("/security/:websiteId/check", async (req, res) => {
+  const userId = req.userId as string;
+  const websiteId = req.params.websiteId as string;
+  if (!(await ownsWebsite(userId, websiteId))) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  const result = await checkSite(websiteId);
+  res.json({ ...result, gscLinks: GSC_UI_LINKS });
+});
+
+/**
+ * "Why pages aren't indexed", in Search Console's own Reason / Source / Pages
+ * shape.
+ *
+ * The Website-source reasons are computed from the latest completed crawl, so
+ * this works with no property linked; the Google-systems reasons need stored
+ * URL Inspection rows and come back `available: false` without them. No
+ * crawl at all is an empty report, not an error -- the tab renders an empty
+ * state, matching /links and /enhancements.
+ */
+gscRouter.get("/coverage/:websiteId", async (req, res) => {
+  const userId = req.userId as string;
+  const websiteId = req.params.websiteId as string;
+  if (!(await ownsWebsite(userId, websiteId))) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  res.json(await getCoverage(websiteId));
 });

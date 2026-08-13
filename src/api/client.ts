@@ -259,14 +259,24 @@ export function cancelCrawl(crawlId: string) {
   return request<{ crawl: Crawl }>(`/crawls/${crawlId}/cancel`, { method: "POST" });
 }
 
-export function getCrawlPages(crawlId: string, opts?: { limit?: number; offset?: number }) {
+export function getCrawlPages(
+  crawlId: string,
+  opts?: { limit?: number; offset?: number; search?: string },
+) {
   const params = new URLSearchParams();
   if (opts?.limit) params.set("limit", String(opts.limit));
   if (opts?.offset) params.set("offset", String(opts.offset));
+  if (opts?.search) params.set("search", opts.search);
   const query = params.toString();
-  return request<{ pages: PageSummary[]; total: number; limit: number; offset: number }>(
-    `/crawls/${crawlId}/pages${query ? `?${query}` : ""}`,
-  );
+  return request<{
+    pages: PageSummary[];
+    /** Every page in the crawl. */
+    total: number;
+    /** Pages matching the search term -- what the pager walks. */
+    matched: number;
+    limit: number;
+    offset: number;
+  }>(`/crawls/${crawlId}/pages${query ? `?${query}` : ""}`);
 }
 
 export function getPage(crawlId: string, pageId: string) {
@@ -312,13 +322,23 @@ export interface IssuesResponse {
   issues: Issue[];
   bySeverity: Array<{ severity: IssueSeverity; count: number }>;
   byType: IssueTypeSummary[];
+  /** Total matching the current filter, not just this page. */
+  matched: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
   truncated: boolean;
 }
 
-export function getCrawlIssues(crawlId: string, opts?: { severity?: string; type?: string }) {
+export function getCrawlIssues(
+  crawlId: string,
+  opts?: { severity?: string; type?: string; limit?: number; offset?: number },
+) {
   const params = new URLSearchParams();
   if (opts?.severity) params.set("severity", opts.severity);
   if (opts?.type) params.set("type", opts.type);
+  if (opts?.limit) params.set("limit", String(opts.limit));
+  if (opts?.offset) params.set("offset", String(opts.offset));
   const q = params.toString();
   return request<IssuesResponse>(`/crawls/${crawlId}/issues${q ? `?${q}` : ""}`);
 }
@@ -370,7 +390,10 @@ export interface OptimizationsResponse {
   optimizations: Optimization[];
   byAction: Array<{ action: OptimizationAction; source: OptimizationSource; count: number }>;
   byStatus: Array<{ status: OptimizationStatus; count: number }>;
-  truncated: boolean;
+  /** Proposals matching the status filter -- what the pager walks. */
+  matched: number;
+  offset: number;
+  limit: number;
 }
 
 export interface OptimizationRunResult {
@@ -385,9 +408,16 @@ export interface OptimizationRunResult {
   aiError: string | null;
 }
 
-export function getCrawlOptimizations(crawlId: string, opts?: { status?: OptimizationStatus }) {
-  const q = opts?.status ? `?status=${opts.status}` : "";
-  return request<OptimizationsResponse>(`/crawls/${crawlId}/optimizations${q}`);
+export function getCrawlOptimizations(
+  crawlId: string,
+  opts?: { status?: OptimizationStatus; limit?: number; offset?: number },
+) {
+  const p = new URLSearchParams();
+  if (opts?.status) p.set("status", opts.status);
+  if (opts?.limit) p.set("limit", String(opts.limit));
+  if (opts?.offset) p.set("offset", String(opts.offset));
+  const q = p.toString();
+  return request<OptimizationsResponse>(`/crawls/${crawlId}/optimizations${q ? `?${q}` : ""}`);
 }
 
 export function generateCrawlOptimizations(crawlId: string) {
@@ -595,8 +625,12 @@ export interface MergedUrlRow {
 export interface MergedUrlsResponse {
   rows: MergedUrlRow[];
   counts: Record<UrlBucket, number>;
+  /** Every URL in the view, ignoring the active filter. */
   total: number;
-  truncated: boolean;
+  /** URLs matching the bucket/search filter -- what the pager walks. */
+  matched: number;
+  offset: number;
+  limit: number;
   /** Which crawl supplied the crawl-side columns. */
   crawlId: string | null;
   range: GscDateRange;
@@ -606,13 +640,22 @@ export interface MergedUrlsResponse {
 
 export function getMergedUrls(
   websiteId: string,
-  opts?: { start?: string; end?: string; bucket?: UrlBucket; search?: string },
+  opts?: {
+    start?: string;
+    end?: string;
+    bucket?: UrlBucket;
+    search?: string;
+    limit?: number;
+    offset?: number;
+  },
 ) {
   const p = new URLSearchParams();
   if (opts?.start) p.set("start", opts.start);
   if (opts?.end) p.set("end", opts.end);
   if (opts?.bucket) p.set("bucket", opts.bucket);
   if (opts?.search) p.set("search", opts.search);
+  if (opts?.limit) p.set("limit", String(opts.limit));
+  if (opts?.offset) p.set("offset", String(opts.offset));
   const q = p.toString();
   return request<MergedUrlsResponse>(`/gsc/urls/${websiteId}${q ? `?${q}` : ""}`);
 }
@@ -631,4 +674,213 @@ export function redetectPlatform(websiteId: string) {
   return request<{ website: Website }>(`/websites/${websiteId}/redetect-platform`, {
     method: "POST",
   });
+}
+
+// ---------------------------------------------------------------------------
+// GSC data integrations: sitemaps, web vitals, links, enhancements, mobile,
+// security
+// ---------------------------------------------------------------------------
+
+export interface SitemapRow {
+  path: string;
+  lastSubmitted: string | null;
+  lastDownloaded: string | null;
+  isPending: boolean;
+  isSitemapsIndex: boolean;
+  warnings: number;
+  errors: number;
+  contents: Array<{ type: string; submitted: number; indexed: number }>;
+}
+
+export interface GscSitemapsResponse {
+  gscLinked: boolean;
+  sitemaps: SitemapRow[];
+  fetchedAt: string | null;
+}
+
+export interface SitemapSyncResult {
+  synced: number;
+  sitemaps: SitemapRow[];
+}
+
+/** One URL's Core Web Vitals from PageSpeed Insights (CrUX field data or Lighthouse lab fallback). */
+export interface CwvRow {
+  url: string;
+  strategy: string;
+  source: "field" | "lab" | "none";
+  /** Lighthouse 0-100, null when absent. */
+  performanceScore: number | null;
+  lcpMs: number | null;
+  inpMs: number | null;
+  cls: number | null;
+  fcpMs: number | null;
+  ttfbMs: number | null;
+  /** Per-metric category, e.g. { LCP: "FAST" }. */
+  categories: Record<string, string>;
+  overall: string | null;
+  collectedAt: string;
+}
+
+export interface WebVitalsResponse {
+  rows: CwvRow[];
+  collectedAt: string | null;
+}
+
+export interface WebVitalsRunResult {
+  tested: number;
+  failed: number;
+  /** Set when the run halted early, e.g. PSI quota exhausted. */
+  stoppedReason: string | null;
+  rows: CwvRow[];
+}
+
+export interface LinkPageRow {
+  url: string;
+  title: string | null;
+  inboundLinks: number;
+  depth: number | null;
+}
+
+export interface LinkDomainRow {
+  domain: string;
+  links: number;
+  sourcePages: number;
+}
+
+export interface OrphanRow {
+  url: string;
+  title: string | null;
+  depth: number | null;
+}
+
+export interface SiteLinksResponse {
+  view: string;
+  /** Rows matching the view -- what the pager walks. */
+  total: number;
+  offset: number;
+  limit: number;
+  /** Shape depends on `view`: pages -> LinkPageRow, domains -> LinkDomainRow, orphans -> OrphanRow. */
+  rows: Array<LinkPageRow | LinkDomainRow | OrphanRow>;
+}
+
+export interface EnhancementTypeRow {
+  /** schema.org `@type` from parsed JSON-LD. */
+  type: string;
+  pages: number;
+  items: number;
+  /** At most 3. */
+  sampleUrls: string[];
+}
+
+export interface EnhancementsResponse {
+  totalPages: number;
+  pagesWithData: number;
+  pagesWithNone: number;
+  types: EnhancementTypeRow[];
+}
+
+export interface MobileUsabilityResponse {
+  totalPages: number;
+  withViewport: number;
+  missingViewport: number;
+  /** Capped at 100 rows server-side. */
+  missingViewportRows: Array<{ url: string; title: string | null }>;
+  /** Mobile-strategy vitals for the same site. */
+  cwv: CwvRow[];
+}
+
+/** From Safe Browsing match.threatType + match.threat.url. */
+export interface ThreatRow {
+  threatType: string;
+  url: string;
+}
+
+export interface SecurityStatusResponse {
+  /** "unavailable" when the server has no GOOGLE_API_KEY for Safe Browsing. */
+  status: "clean" | "flagged" | "unavailable";
+  threats: ThreatRow[];
+  checkedAt: string | null;
+  /** Deep links into the GSC UI -- manual actions have no API. */
+  gscLinks: { manualActions: string; securityIssues: string };
+}
+
+export function getGscSitemaps(websiteId: string) {
+  return request<GscSitemapsResponse>(`/gsc/sitemaps/${websiteId}`);
+}
+
+export function syncGscSitemaps(websiteId: string) {
+  return request<SitemapSyncResult>(`/gsc/sitemaps/${websiteId}/sync`, { method: "POST" });
+}
+
+export function getWebVitals(websiteId: string, strategy = "mobile") {
+  return request<WebVitalsResponse>(`/gsc/cwv/${websiteId}?strategy=${strategy}`);
+}
+
+export function runWebVitals(websiteId: string, opts?: { limit?: number; strategy?: string }) {
+  return request<WebVitalsRunResult>(`/gsc/cwv/${websiteId}/run`, {
+    method: "POST",
+    body: JSON.stringify(opts ?? {}),
+  });
+}
+
+export function getSiteLinks(
+  websiteId: string,
+  opts: { view: "pages" | "domains" | "orphans"; limit?: number; offset?: number },
+) {
+  const p = new URLSearchParams();
+  p.set("view", opts.view);
+  if (opts.limit) p.set("limit", String(opts.limit));
+  if (opts.offset) p.set("offset", String(opts.offset));
+  return request<SiteLinksResponse>(`/gsc/links/${websiteId}?${p.toString()}`);
+}
+
+export function getGscEnhancements(websiteId: string) {
+  return request<EnhancementsResponse>(`/gsc/enhancements/${websiteId}`);
+}
+
+export function getMobileUsability(websiteId: string) {
+  return request<MobileUsabilityResponse>(`/gsc/mobile/${websiteId}`);
+}
+
+export function getSecurityStatus(websiteId: string) {
+  return request<SecurityStatusResponse>(`/gsc/security/${websiteId}`);
+}
+
+export function runSecurityCheck(websiteId: string) {
+  return request<SecurityStatusResponse>(`/gsc/security/${websiteId}/check`, { method: "POST" });
+}
+
+// ---------------------------------------------------------------------------
+// Index coverage: why pages aren't indexed
+// ---------------------------------------------------------------------------
+
+/** One row of the coverage table, mirroring Search Console's Reason / Source / Pages. */
+export interface CoverageReasonRow {
+  reason: string;
+  /** "Website" reasons come from our crawl; "Google systems" need URL Inspection. */
+  source: "Website" | "Google systems";
+  pages: number;
+  /** False when the data behind the reason hasn't been collected -- 0 means unknown, not clean. */
+  available: boolean;
+  /** At most 5. */
+  sampleUrls: string[];
+  /** One plain sentence: what the reason means and what to do about it. */
+  detail: string;
+}
+
+export interface CoverageResponse {
+  crawlId: string | null;
+  crawledAt: string | null;
+  totalCrawled: number;
+  indexableCount: number;
+  /** The seven Website-source reasons, pages desc. Zero-count rows are included. */
+  reasons: CoverageReasonRow[];
+  /** The three Google-systems reasons; `available: false` until URLs are inspected. */
+  googleReasons: CoverageReasonRow[];
+  /** Stored inspection rows for the linked property. */
+  inspectionsAvailable: number;
+}
+
+export function getCoverage(websiteId: string) {
+  return request<CoverageResponse>(`/gsc/coverage/${websiteId}`);
 }

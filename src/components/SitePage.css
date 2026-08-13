@@ -1,57 +1,50 @@
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 30, 51, 0.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  z-index: 100;
-  animation: backdrop-in 0.12s ease-out;
-}
-
-@keyframes backdrop-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-.modal-panel {
-  background: var(--card-bg, #fff);
-  border-radius: 14px;
-  width: min(1080px, 96vw);
-  max-height: min(720px, 90vh);
+/**
+ * Full-page site view.
+ *
+ * Was a modal. A modal is for a short interruption you dismiss; this is a
+ * working surface holding 10,000 URLs, four sections and paged tables --
+ * capping it at a dialog's width and height was fighting the content, and a
+ * backdrop that closes on a stray click is hostile when you are halfway
+ * through reviewing findings.
+ */
+.site-page {
   display: flex;
   flex-direction: column;
-  box-shadow: 0 16px 40px rgba(15, 30, 51, 0.28);
-  animation: panel-in 0.14s ease-out;
+  min-height: 100vh;
+  background: var(--bg, #f5f7fa);
 }
 
-@keyframes panel-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-.modal-header {
+.site-page-header {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  padding: 18px 20px 14px;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 22px;
+  background: var(--card-bg, #fff);
   border-bottom: 1px solid var(--border, #d6dde6);
+  position: sticky;
+  top: 0;
+  z-index: 5;
 }
+
+.site-back { flex-shrink: 0; }
+
+.site-page-title h2 {
+  margin: 0;
+  font-size: 17px;
+  color: var(--navy, #16345c);
+}
+
+.site-page-title p { margin: 1px 0 0; }
+
+
+
+
+
 
 .modal-header h3 {
   margin: 0;
   font-size: 16px;
+  font-weight: 700;
   color: var(--navy, #16345c);
 }
 
@@ -59,34 +52,9 @@
   margin: 2px 0 0;
 }
 
-.modal-close {
-  background: none;
-  border: none;
-  font-size: 22px;
-  line-height: 1;
-  color: var(--muted, #5b6472);
-  cursor: pointer;
-  padding: 2px 6px;
-  border-radius: 6px;
-}
 
-.modal-close:hover {
-  background: var(--bg, #f5f7fa);
-}
 
-.modal-body {
-  padding: 14px 20px 20px;
-  overflow-y: auto;
-}
 
-.modal-summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 0 0 12px;
-  flex-wrap: wrap;
-}
 
 .summary-highlight {
   color: var(--blue, #1f6fb2);
@@ -98,20 +66,7 @@
   font-weight: 700;
 }
 
-.modal-search {
-  padding: 6px 10px;
-  border: 1px solid var(--border, #d6dde6);
-  border-radius: 6px;
-  font-size: 12.5px;
-  min-width: 220px;
-  background: var(--bg, #f5f7fa);
-}
 
-.modal-search:focus {
-  outline: 2px solid var(--blue, #1f6fb2);
-  outline-offset: -1px;
-  background: var(--card-bg, #fff);
-}
 
 .pages-table-wrap {
   overflow-x: auto;
@@ -840,32 +795,9 @@
 
 /* ---------- Modal tabs ---------- */
 
-.modal-tabs {
-  display: flex;
-  gap: 4px;
-  padding: 0 20px;
-  border-bottom: 1px solid var(--border, #d6dde6);
-  flex-shrink: 0;
-}
 
-.modal-tab {
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  padding: 10px 14px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--muted, #5b6472);
-  cursor: pointer;
-  margin-bottom: -1px;
-}
 
-.modal-tab:hover { color: var(--navy, #16345c); }
 
-.modal-tab-active {
-  color: var(--accent, #2f6fed);
-  border-bottom-color: var(--accent, #2f6fed);
-}
 
 /* ---------- Issues ---------- */
 
@@ -1338,3 +1270,126 @@
 .opt-status-approved { background: #e6f4ea; color: #2e8b57; }
 .opt-status-rejected { background: #fbe9e7; color: #b3261e; }
 .opt-status-applied { background: #e4ecf8; color: var(--blue, #1f6fb2); }
+
+/* ---------- Sidebar layout ---------- */
+
+.site-layout {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* Sidebar sticks below the header while the content scrolls past it. */
+.site-nav {
+  position: sticky;
+  top: 61px;
+  align-self: start;
+  max-height: calc(100vh - 61px);
+}
+
+/* The page scrolls, not an inner box -- that is the whole point of not being
+   a modal, so the browser's own scrollbar and Ctrl+F work normally. The
+   !important overrides are gone with the .modal-body class they were fighting;
+   this element no longer inherits any dialog rule. */
+.site-content {
+  padding: 18px 22px;
+  min-width: 0;
+}
+
+.site-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 8px;
+  border-right: 1px solid var(--border, #d6dde6);
+  background: var(--bg, #f5f7fa);
+  overflow-y: auto;
+}
+
+.site-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted, #5b6472);
+  text-align: left;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.site-nav-item:hover { background: #eef1f6; color: var(--text, #1b222c); }
+
+.site-nav-item-active {
+  background: var(--card-bg, #fff);
+  color: var(--navy, #16345c);
+  box-shadow: 0 1px 2px rgb(16 24 40 / 8%);
+}
+
+.site-nav-label { flex: 1; min-width: 0; }
+
+.site-nav-count {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--muted, #5b6472);
+  background: #e6eaf0;
+  border-radius: 999px;
+  padding: 0 6px;
+}
+
+.site-nav-item-active .site-nav-count { background: #e4ecf8; color: var(--navy, #16345c); }
+
+/* Group heading. Without it the five Search Console entries read as more
+   crawl sections, and "Pages" would sit two rows from "Crawled pages"
+   meaning something entirely different. */
+.site-nav-group {
+  margin: 14px 0 4px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted, #5b6472);
+}
+
+/* Narrow screens: the sidebar becomes a horizontal strip rather than eating
+   half the width. */
+@media (max-width: 720px) {
+  .site-layout { grid-template-columns: 1fr; }
+  .site-nav {
+    flex-direction: row;
+    align-items: center;
+    overflow-x: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--border, #d6dde6);
+    padding: 8px;
+  }
+  .site-nav-item { width: auto; white-space: nowrap; }
+  /* A stacked heading would break the row; it becomes an inline divider. */
+  .site-nav-group {
+    margin: 0 4px;
+    padding: 0 0 0 8px;
+    border-left: 1px solid var(--border, #d6dde6);
+    white-space: nowrap;
+    align-self: stretch;
+    display: flex;
+    align-items: center;
+  }
+}
+
+/* Instance pagination footer */
+.issue-more {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 10px;
+  padding-top: 4px;
+  border-top: 1px solid #eef1f4;
+}

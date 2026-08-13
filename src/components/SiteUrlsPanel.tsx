@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import type { MergedUrlRow, MergedUrlsResponse, UrlBucket } from "../api/client";
 import { getMergedUrls } from "../api/client";
+import { Pagination } from "./Pagination";
+import "./Panel.css";
 import "./SiteUrlsPanel.css";
 
 /**
@@ -58,6 +60,12 @@ export function SiteUrlsPanel({
   const [applied, setApplied] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [offset, setOffset] = useState(0);
+  const [pageSize, setPageSize] = useState(100);
+
+  // Any change to what is being counted invalidates the current page number:
+  // page 40 of the unfiltered list is past the end of a 12-row bucket.
+  useEffect(() => setOffset(0), [websiteId, range?.start, range?.end, bucket, applied]);
 
   useEffect(() => {
     let cancelled = false;
@@ -68,6 +76,8 @@ export function SiteUrlsPanel({
       end: range?.end,
       bucket: bucket ?? undefined,
       search: applied || undefined,
+      limit: pageSize,
+      offset,
     })
       .then((res) => {
         if (!cancelled) setData(res);
@@ -83,7 +93,7 @@ export function SiteUrlsPanel({
     return () => {
       cancelled = true;
     };
-  }, [websiteId, range?.start, range?.end, bucket, applied]);
+  }, [websiteId, range?.start, range?.end, bucket, applied, offset, pageSize]);
 
   return (
     <div className="su-panel">
@@ -109,13 +119,12 @@ export function SiteUrlsPanel({
         </p>
       )}
 
-      <div className="modal-summary">
+      <div className="panel-summary">
         <span className="muted small">
           {loading
             ? "Loading…"
-            : `${(data?.rows.length ?? 0).toLocaleString()} shown of ${(data?.total ?? 0).toLocaleString()} URLs`}
+            : `${(data?.matched ?? 0).toLocaleString()} of ${(data?.total ?? 0).toLocaleString()} URLs`}
           {bucket && ` · ${BUCKETS.find((b) => b.key === bucket)?.label}`}
-          {data?.truncated && " · list capped at 2,000"}
         </span>
         <form
           onSubmit={(e) => {
@@ -125,7 +134,7 @@ export function SiteUrlsPanel({
         >
           <input
             type="text"
-            className="modal-search"
+            className="panel-search"
             placeholder="Filter by URL, then Enter…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -159,6 +168,21 @@ export function SiteUrlsPanel({
           <p className="muted small gsc-truncated">Nothing in this bucket for the selected dates.</p>
         )}
       </div>
+
+      {(data?.matched ?? 0) > 0 && (
+        <Pagination
+          total={data?.matched ?? 0}
+          offset={offset}
+          pageSize={pageSize}
+          busy={loading}
+          noun="URL"
+          plural="URLs"
+          onChange={(next) => {
+            setOffset(next.offset);
+            setPageSize(next.pageSize);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -176,11 +200,11 @@ function UrlRow({ row }: { row: MergedUrlRow }) {
         </a>
         {row.title && <span className="su-title">{row.title}</span>}
       </td>
-      <td className="gsc-td-num">{row.clicks.toLocaleString()}</td>
-      <td className="gsc-td-num">{row.impressions.toLocaleString()}</td>
-      <td className="gsc-td-num">{row.position === null ? "—" : row.position.toFixed(1)}</td>
-      <td className="gsc-td-num">{notCrawled ? "—" : (row.wordCount ?? "—")}</td>
-      <td className="gsc-td-num">
+      <td className="gsc-cell-label">{row.clicks.toLocaleString()}</td>
+      <td className="gsc-cell-label">{row.impressions.toLocaleString()}</td>
+      <td className="gsc-cell-label">{row.position === null ? "—" : row.position.toFixed(1)}</td>
+      <td className="gsc-cell-label">{notCrawled ? "—" : (row.wordCount ?? "—")}</td>
+      <td className="gsc-cell-label">
         {notCrawled ? "—" : row.issueCount > 0 ? <span className="su-issues">{row.issueCount}</span> : "0"}
       </td>
       <td className="gsc-cell-label" title={row.coverageState ?? ""}>

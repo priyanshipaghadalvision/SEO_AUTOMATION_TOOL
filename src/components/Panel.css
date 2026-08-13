@@ -1,0 +1,33 @@
+/*
+ * Chrome shared by data panels, wherever they are hosted.
+ *
+ * These rules describe a table toolbar, not a dialog. They used to be named
+ * .modal-* and lived in Modal.css, which meant a full page had to import a
+ * dialog stylesheet to get a search box -- and deleting a modal rule silently
+ * broke unrelated views. Anything here must hold up inside a modal AND on a
+ * page; anything that only makes sense in a dialog belongs in Modal.css.
+ */
+
+.panel-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 12px;
+  flex-wrap: wrap;
+}
+
+.panel-search {
+  padding: 6px 10px;
+  border: 1px solid var(--border, #d6dde6);
+  border-radius: 6px;
+  font-size: 12.5px;
+  min-width: 220px;
+  background: var(--bg, #f5f7fa);
+}
+
+.panel-search:focus {
+  outline: 2px solid var(--blue, #1f6fb2);
+  outline-offset: -1px;
+  background: var(--card-bg, #fff);
+}

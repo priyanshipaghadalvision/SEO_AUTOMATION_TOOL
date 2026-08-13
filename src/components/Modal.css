@@ -1,0 +1,101 @@
+/**
+ * The overlay shell, shared by every genuine modal.
+ *
+ * Lives on its own because it used to sit in the crawl view's stylesheet.
+ * When that view became a full page the rules went with it, silently leaving
+ * the Search Console modal with no panel at all -- a shared shell should not
+ * depend on an unrelated component still importing it.
+ */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 30, 51, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 100;
+  animation: backdrop-in 0.12s ease-out;
+}
+
+.modal-panel {
+  background: var(--card-bg, #fff);
+  border-radius: 14px;
+  width: min(1240px, 96vw);
+  max-height: min(760px, 92vh);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 16px 40px rgba(15, 30, 51, 0.28);
+  animation: panel-in 0.14s ease-out;
+}
+
+@keyframes backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes panel-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.99); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Shared modal chrome: header, tab strip, body and search row. Moved here
+   with the shell so a modal never depends on the page stylesheet. */
+.modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--border, #d6dde6);
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 22px;
+  line-height: 1;
+  color: var(--muted, #5b6472);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+.modal-close:hover {
+  background: var(--bg, #f5f7fa);
+}
+
+.modal-body {
+  padding: 14px 20px 20px;
+  overflow-y: auto;
+}
+
+/* The toolbar above a table (.panel-summary / .panel-search) lives in
+   Panel.css -- it is not modal chrome, and naming it modal-* is what let a
+   full page end up importing a stylesheet for dialogs. */
+
+.modal-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--border, #d6dde6);
+  flex-shrink: 0;
+}
+
+.modal-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted, #5b6472);
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+
+.modal-tab:hover { color: var(--navy, #16345c); }
+
+.modal-tab-active {
+  color: var(--accent, #2f6fed);
+  border-bottom-color: var(--accent, #2f6fed);
+}
