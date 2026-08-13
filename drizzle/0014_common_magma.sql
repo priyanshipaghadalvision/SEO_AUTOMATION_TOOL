@@ -1,0 +1,1 @@
+CREATE INDEX "issues_page_id_idx" ON "issues" USING btree ("page_id");

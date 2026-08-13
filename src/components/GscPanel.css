@@ -1,0 +1,83 @@
+.gsc-card { display: flex; flex-direction: column; gap: 10px; }
+
+.gsc-account { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+
+.gsc-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #2e8b57;
+  flex-shrink: 0;
+}
+
+.gsc-connect { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+.gsc-connect p { max-width: 620px; margin: 0; }
+
+.gsc-ok { color: #2e8b57; margin: 0; }
+.gsc-warn { color: #b3611a; margin: 0; }
+
+.gsc-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 13px;
+}
+
+.gsc-table thead th {
+  text-align: left;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted, #5b6472);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border, #d6dde6);
+}
+
+.gsc-table th:nth-child(2), .gsc-table td:nth-child(2) { width: 100px; }
+.gsc-table th:nth-child(3), .gsc-table td:nth-child(3) { width: 30%; }
+.gsc-table th:nth-child(4), .gsc-table td:nth-child(4) { width: 230px; }
+
+.gsc-table tbody td {
+  padding: 8px;
+  border-bottom: 1px solid #f0f3f7;
+  vertical-align: middle;
+}
+
+.gsc-table tbody tr:last-child td { border-bottom: none; }
+
+.gsc-site-url {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gsc-type-chip { background: #eef1f6; color: #5b6472; }
+
+.gsc-linked { font-weight: 600; color: var(--navy, #16345c); }
+
+.gsc-select {
+  font: inherit;
+  font-size: 12.5px;
+  padding: 4px 8px;
+  border: 1px solid var(--border, #d6dde6);
+  border-radius: 6px;
+  background: var(--card-bg, #fff);
+  color: var(--text, #1b222c);
+  max-width: 100%;
+}
+
+.gsc-row-actions { display: flex; gap: 4px; justify-content: flex-end; flex-wrap: wrap; }
+
+.gsc-unverified {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #b3611a;
+  background: #fdf1e6;
+  border-radius: 4px;
+  padding: 2px 8px;
+  white-space: nowrap;
+  cursor: help;
+}

@@ -1,0 +1,86 @@
+.su-panel { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+
+.su-buckets {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.su-bucket {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border, #d6dde6);
+  border-radius: 8px;
+  background: var(--card-bg, #fff);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.su-bucket:hover { border-color: var(--accent, #2f6fed); }
+.su-bucket-active { border-width: 2px; padding: 9px 11px; }
+
+.su-bucket-count { font-size: 20px; font-weight: 700; line-height: 1.1; }
+
+.su-bucket-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted, #5b6472);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.su-bucket-good .su-bucket-count { color: #2e8b57; }
+.su-bucket-good.su-bucket-active { border-color: #2e8b57; background: #f2fbf5; }
+.su-bucket-warn .su-bucket-count { color: #b3611a; }
+.su-bucket-warn.su-bucket-active { border-color: #b3611a; background: #fffaf3; }
+.su-bucket-bad .su-bucket-count { color: #b3261e; }
+.su-bucket-bad.su-bucket-active { border-color: #b3261e; background: #fdf3f2; }
+.su-bucket-info .su-bucket-count { color: var(--blue, #1f6fb2); }
+.su-bucket-info.su-bucket-active { border-color: var(--blue, #1f6fb2); background: #f4f8fd; }
+.su-bucket-muted .su-bucket-count { color: var(--muted, #5b6472); }
+.su-bucket-muted.su-bucket-active { border-color: var(--muted, #5b6472); background: #f5f7fa; }
+
+.su-hint { margin: -4px 0 0; }
+
+.su-table th:nth-child(1), .su-table td:nth-child(1) { width: 38%; }
+.su-table th:nth-child(7), .su-table td:nth-child(7) { width: 22%; }
+.su-table td { vertical-align: top; }
+
+.su-title {
+  display: block;
+  font-size: 11px;
+  color: var(--muted, #5b6472);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 1px;
+}
+
+.su-issues {
+  display: inline-block;
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #fdf1e6;
+  color: #b3611a;
+  font-weight: 700;
+  font-size: 11px;
+}
+
+.su-flag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #fbe9e7;
+  color: #b3261e;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}

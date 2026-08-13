@@ -1,0 +1,767 @@
+:root {
+  --navy: #16345c;
+  --blue: #1f6fb2;
+  --accent: #2f6fed;
+  --accent-dark: #1d4fd1;
+  --bg: #f4f6fa;
+  --card-bg: #ffffff;
+  --border: #dee3ea;
+  --text: #1b222c;
+  --muted: #5b6472;
+  --success: #1f9d5a;
+  --warning: #b3611a;
+  --danger: #d1362f;
+  --radius-lg: 14px;
+  --radius-md: 10px;
+  --radius-sm: 8px;
+  --shadow-sm: 0 1px 2px rgba(15, 30, 51, 0.05);
+  --shadow-md: 0 8px 24px rgba(15, 30, 51, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Nunito", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.page {
+  min-height: 100vh;
+}
+
+/* ---------- Top bar ---------- */
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--card-bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.topbar-inner {
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 16px clamp(16px, 3vw, 40px);
+}
+
+.topbar-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.topbar-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.user-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px 5px 5px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  max-width: 260px;
+}
+
+.user-avatar {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--accent), var(--navy));
+  color: white;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.user-email {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--navy);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brand-mark {
+  flex-shrink: 0;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--accent), var(--navy));
+  color: white;
+  font-size: 12.5px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  box-shadow: var(--shadow-sm);
+}
+
+.brand h1 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--navy);
+  letter-spacing: -0.01em;
+}
+
+.subtitle {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* ---------- Content shell ---------- */
+
+.content {
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 24px clamp(16px, 3vw, 40px) 80px;
+}
+
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.stat-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-shadow: var(--shadow-sm);
+}
+
+.stat-value {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--navy);
+  line-height: 1.1;
+}
+
+.stat-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.stat-card-warning .stat-value {
+  color: var(--warning);
+}
+
+/* ---------- Cards ---------- */
+
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 22px clamp(16px, 2vw, 26px);
+  margin-bottom: 20px;
+  box-shadow: var(--shadow-sm);
+}
+
+.card h2 {
+  margin: 0 0 16px;
+  font-size: 15.5px;
+  font-weight: 700;
+  color: var(--navy);
+}
+
+.card-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 7px;
+}
+
+.card-header-row h2 {
+  margin: 0;
+}
+
+.websites-card {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.websites-card > .card-header-row {
+  padding: 0 clamp(16px, 2vw, 26px) 16px;
+}
+
+.websites-card > p {
+  padding: 0 clamp(16px, 2vw, 26px);
+}
+
+/* ---------- Add website form ---------- */
+
+.add-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.input-with-icon {
+  flex: 1 1 240px;
+  /* Without this a flex item refuses to shrink past its content width,
+     pushing the submit button outside the viewport on narrow screens. */
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--muted);
+}
+
+.input-with-icon:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  background: var(--card-bg);
+}
+
+.input-with-icon input {
+  flex: 1;
+  border: none;
+  background: none;
+  padding: 11px 0;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.input-with-icon input:focus {
+  outline: none;
+}
+
+/* ---------- Buttons ---------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: filter 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent), var(--accent-dark));
+  color: white;
+  box-shadow: 0 1px 2px rgba(29, 79, 209, 0.25);
+}
+
+.btn-primary:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.btn-primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  filter: none;
+}
+
+.btn-danger {
+  background: linear-gradient(135deg, #e14b43, #c3352e);
+  color: white;
+  box-shadow: 0 1px 2px rgba(195, 53, 46, 0.25);
+}
+
+.btn-danger:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.btn-danger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  filter: none;
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--navy);
+  border: 1px solid var(--border);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: var(--bg);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.btn-ghost:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-sm {
+  padding: 7px 12px;
+  font-size: 12.5px;
+}
+
+.link-button {
+  background: transparent;
+  border: none;
+  color: var(--blue);
+  padding: 4px 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.link-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.error-text {
+  color: var(--danger);
+  font-size: 13px;
+  margin: 10px 0 0;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.small {
+  font-size: 12.5px;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+/* ---------- Websites table ---------- */
+
+.websites-table-wrap {
+  overflow-x: auto;
+}
+
+.websites-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+
+.websites-table thead th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  padding: 10px clamp(16px, 2vw, 26px);
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.actions-head {
+  width: 1%;
+}
+
+.websites-table tbody td {
+  padding: 14px clamp(16px, 2vw, 26px);
+  border-bottom: 1px solid #eef1f4;
+  vertical-align: middle;
+}
+
+.website-row-tr:hover {
+  background: #fbfcfd;
+}
+
+.website-cell {
+  min-width: 220px;
+}
+
+.website-domain-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.domain {
+  font-weight: 700;
+  font-size: 14.5px;
+  color: var(--text);
+}
+
+.website-url {
+  display: block;
+  margin-top: 2px;
+  max-width: 380px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.website-url:hover {
+  text-decoration: underline;
+  color: var(--blue);
+}
+
+.platform-tag {
+  display: inline-block;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #eaf2fb;
+  color: var(--blue);
+  border: 1px solid #c3d8ef;
+  white-space: nowrap;
+}
+
+.platform-tag-warning {
+  background: #fdf1e6;
+  color: var(--warning);
+  border-color: #f0d3ae;
+}
+
+.actions-cell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+/* Direct-child selector, not a descendant one: this row hosts a nested
+   crawl table, and `.website-detail-row td` would strip that table's own
+   cell padding too. Scoped through .websites-table so it outranks the
+   generic `.websites-table tbody td` padding without needing !important. */
+.websites-table tbody tr.website-detail-row > td {
+  padding: 0;
+  background: linear-gradient(180deg, #f0f3f8 0%, var(--bg) 100%);
+  border-bottom: 1px solid var(--border);
+  box-shadow: inset 0 1px 0 rgba(15, 30, 51, 0.06);
+}
+
+.crawl-panel {
+  padding: 20px clamp(16px, 2vw, 26px) 26px;
+}
+
+.crawl-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.crawl-panel-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.crawl-count-pill {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: #e6ecf6;
+  color: var(--navy);
+  border: 1px solid #d2dcea;
+}
+
+.crawl-panel-empty {
+  margin: 0;
+  padding: 22px;
+  text-align: center;
+  background: var(--card-bg);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+}
+
+/* ---------- Icon buttons ---------- */
+
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card-bg);
+  color: var(--navy);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.icon-button:hover:not(:disabled) {
+  background: var(--bg);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.icon-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.icon-button-danger {
+  color: var(--danger);
+  border-color: #f0cdca;
+}
+
+.icon-button-danger:hover:not(:disabled) {
+  background: #fdecea;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.crawl-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chevron-button svg {
+  transition: transform 0.18s ease;
+}
+
+.chevron-button-open svg {
+  transform: rotate(180deg);
+}
+
+.spin-icon {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------- Crawl history table ---------- */
+
+.crawl-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--card-bg);
+  box-shadow: var(--shadow-sm);
+}
+
+.crawl-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+}
+
+.crawl-table thead th {
+  text-align: left;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  padding: 11px 18px;
+  background: #f7f9fc;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.crawl-table-actions-head {
+  width: 56px;
+}
+
+.crawl-table tbody td {
+  padding: 14px 18px;
+  border-bottom: 1px solid #eef1f4;
+  vertical-align: middle;
+}
+
+.crawl-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.crawl-table tbody tr {
+  transition: background 0.12s ease;
+}
+
+.crawl-table tbody tr:hover {
+  background: #f8fafd;
+}
+
+.crawl-failure-reason {
+  margin-top: 5px;
+  max-width: 280px;
+  line-height: 1.4;
+}
+
+.progress-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 190px;
+}
+
+.progress-substats {
+  margin-top: 5px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.progress-bar {
+  flex: 1;
+  height: 7px;
+  border-radius: 999px;
+  background: #e8ecf2;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), #5b91f5);
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+
+/* Barber-pole shimmer while a crawl is genuinely in flight, so an active
+   crawl reads as "working" even during stretches where the page count
+   doesn't visibly move. Terminal states override the background entirely. */
+.progress-bar-fill:not([class*="progress-bar-fill-"]) {
+  background-image: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.28) 25%,
+    transparent 25%,
+    transparent 50%,
+    rgba(255, 255, 255, 0.28) 50%,
+    rgba(255, 255, 255, 0.28) 75%,
+    transparent 75%
+  ),
+  linear-gradient(90deg, var(--accent), #5b91f5);
+  background-size: 18px 18px, 100% 100%;
+  animation: barber 0.8s linear infinite;
+}
+
+@keyframes barber {
+  to {
+    background-position: 18px 0, 0 0;
+  }
+}
+
+.stat-chip {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #eff2f7;
+  color: var(--muted);
+  border: 1px solid #e2e7ee;
+  white-space: nowrap;
+}
+
+.stat-chip-danger {
+  background: #fdecea;
+  color: var(--danger);
+  border-color: #f7d4d0;
+}
+
+.stat-chip-accent {
+  background: #f1eefc;
+  color: #6b4fbb;
+  border-color: #ded5f6;
+}
+
+.limits-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.progress-bar-fill-completed {
+  background: var(--success);
+}
+
+.progress-bar-fill-failed {
+  background: var(--danger);
+}
+
+.progress-bar-fill-cancelled {
+  background: #6b5b95;
+}
+
+.progress-count {
+  white-space: nowrap;
+}
+
+/* ---------- Status badges ---------- */
+
+.badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+}
+
+.badge-queued {
+  background: #eef0f3;
+  color: #5b6472;
+}
+
+.badge-running {
+  background: #e3effc;
+  color: var(--blue);
+}
+
+.badge-completed {
+  background: #e6f4ea;
+  color: var(--success);
+}
+
+.badge-failed {
+  background: #fbe9e7;
+  color: var(--danger);
+}
+
+.badge-cancelled {
+  background: #f1eef5;
+  color: #6b5b95;
+}

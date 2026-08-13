@@ -1,0 +1,16 @@
+ALTER TABLE "pages" ADD COLUMN "content_text" text;--> statement-breakpoint
+ALTER TABLE "pages" ADD COLUMN "content_hash" text;--> statement-breakpoint
+ALTER TABLE "pages" ADD COLUMN "internal_links" jsonb;--> statement-breakpoint
+ALTER TABLE "pages" ADD COLUMN "external_links" jsonb;--> statement-breakpoint
+ALTER TABLE "pages" ADD COLUMN "internal_link_count" integer;--> statement-breakpoint
+ALTER TABLE "pages" ADD COLUMN "external_link_count" integer;--> statement-breakpoint
+ALTER TABLE "pages" ADD COLUMN "noindex" boolean;--> statement-breakpoint
+ALTER TABLE "pages" ADD COLUMN "nofollow" boolean;--> statement-breakpoint
+ALTER TABLE "pages" ADD COLUMN "x_robots_tag" text;--> statement-breakpoint
+ALTER TABLE "pages" ADD COLUMN "open_graph" jsonb;--> statement-breakpoint
+ALTER TABLE "pages" ADD COLUMN "lang" text;--> statement-breakpoint
+ALTER TABLE "pages" ADD COLUMN "viewport" text;--> statement-breakpoint
+ALTER TABLE "pages" ADD COLUMN "hreflang" jsonb;--> statement-breakpoint
+ALTER TABLE "pages" ADD COLUMN "html_bytes" integer;--> statement-breakpoint
+ALTER TABLE "pages" ADD COLUMN "response_time_ms" integer;--> statement-breakpoint
+CREATE INDEX "pages_content_hash_idx" ON "pages" USING btree ("crawl_id","content_hash");

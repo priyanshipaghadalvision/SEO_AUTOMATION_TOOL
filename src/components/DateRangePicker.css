@@ -1,0 +1,50 @@
+.dr-picker { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+
+.dr-presets {
+  display: flex;
+  gap: 3px;
+  background: var(--bg, #f5f7fa);
+  border: 1px solid var(--border, #d6dde6);
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.dr-preset {
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted, #5b6472);
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.dr-preset:hover:not(:disabled) { color: var(--text, #1b222c); }
+.dr-preset:disabled { opacity: 0.5; cursor: default; }
+
+.dr-preset-active {
+  background: var(--card-bg, #fff);
+  color: var(--navy, #16345c);
+  box-shadow: 0 1px 2px rgb(16 24 40 / 8%);
+}
+
+.dr-custom { display: flex; align-items: center; gap: 6px; }
+
+.dr-date {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 8px;
+  border: 1px solid var(--border, #d6dde6);
+  border-radius: 6px;
+  background: var(--card-bg, #fff);
+  color: var(--text, #1b222c);
+}
+
+.dr-arrow { color: var(--muted, #5b6472); font-size: 12px; }
+
+/* Loading is a hint, never a lock -- the controls stay clickable so a slow
+   range can always be abandoned for one that is already stored. */
+.dr-picker-busy .dr-presets { opacity: 0.7; }

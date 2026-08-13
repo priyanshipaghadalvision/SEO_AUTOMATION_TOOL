@@ -1,0 +1,111 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1786440954929,
+      "tag": "0000_majestic_skreet",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1786442535854,
+      "tag": "0001_thin_nico_minoru",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786446346267,
+      "tag": "0002_flowery_titanium_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786451688841,
+      "tag": "0003_abnormal_iron_monger",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786513894157,
+      "tag": "0004_strong_hairball",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786515575272,
+      "tag": "0005_careless_wong",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786516814589,
+      "tag": "0006_aromatic_killmonger",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786519883019,
+      "tag": "0007_acoustic_vindicator",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786527396308,
+      "tag": "0008_thankful_loners",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1786533834472,
+      "tag": "0009_aberrant_nextwave",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1786593029777,
+      "tag": "0010_cuddly_miracleman",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1786593950215,
+      "tag": "0011_mute_the_santerians",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1786597518086,
+      "tag": "0012_ambiguous_doctor_spectrum",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1786602327875,
+      "tag": "0013_steep_scrambler",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1786604375256,
+      "tag": "0014_common_magma",
+      "breakpoints": true
+    }
+  ]
+}
