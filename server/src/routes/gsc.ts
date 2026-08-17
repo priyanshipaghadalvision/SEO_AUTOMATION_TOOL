@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { gscBreakdowns, gscConnections, gscPageMetrics, gscProperties, gscSitemaps, gscUrlInspections, websites } from "../db/schema.js";
+import { crawls, gscBreakdowns, gscConnections, gscPageMetrics, gscProperties, gscSitemaps, gscUrlInspections, websites } from "../db/schema.js";
 import { canReadData, listSites } from "../gsc/client.js";
 import {
   GscConnectionExpiredError,
@@ -13,7 +13,7 @@ import {
   verifyState,
 } from "../gsc/oauth.js";
 import { inspectPropertyUrls } from "../gsc/inspectUrls.js";
-import { latestUsableDate, resolveRange } from "../gsc/dateRange.js";
+import { latestUsableDate, provisionalStartDate, resolveRange } from "../gsc/dateRange.js";
 import { ensureRangeData } from "../gsc/ensureRange.js";
 import { getMergedUrls } from "../gsc/mergedUrls.js";
 import type { Bucket } from "../gsc/mergedUrls.js";
@@ -24,6 +24,7 @@ import { getEnhancements, getLinkInsights, getMobileUsability } from "../gsc/sit
 import { getCoverage } from "../gsc/coverage.js";
 import { checkSite, getSecurityStatus } from "../gsc/safeBrowsing.js";
 import { logAuditEvent } from "../lib/audit.js";
+import { DEFAULT_CRAWL_LIMITS } from "../lib/crawlLimits.js";
 
 /** How long a live range pull may block the request before we serve stored data. */
 const RANGE_FETCH_TIMEOUT_MS = 25_000;
@@ -348,6 +349,84 @@ gscRouter.post("/inspect/:websiteId", async (req, res) => {
   });
 });
 
+/** Queue the app's own crawler for the URLs under one Google inspection reason. */
+gscRouter.post("/crawl-reason/:websiteId", async (req, res) => {
+  const body = req.body as { reason?: unknown; pageUrls?: unknown } | undefined;
+  const reason = body?.reason;
+  // Target only an exact, stored exclusion reason. This is the app's crawler,
+  // not Google's Request Indexing action.
+  if (typeof reason !== "string" || reason.length === 0 || reason.length > 500) {
+    res.status(400).json({ error: "unsupported_reason" });
+    return;
+  }
+
+  const userId = req.userId as string;
+  const [row] = await db
+    .select({ website: websites, property: gscProperties })
+    .from(gscProperties)
+    .innerJoin(websites, eq(websites.id, gscProperties.websiteId))
+    .where(and(eq(gscProperties.websiteId, req.params.websiteId as string), eq(websites.userId, userId)));
+  if (!row) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+
+  const inspected = await db
+    .select({ pageUrl: gscUrlInspections.pageUrl })
+    .from(gscUrlInspections)
+    .where(and(
+      eq(gscUrlInspections.propertyId, row.property.id),
+      eq(gscUrlInspections.coverageState, reason),
+      eq(gscUrlInspections.verdict, "NEUTRAL"),
+    ));
+  const matchingUrls = new Set(inspected.map((item) => item.pageUrl));
+  const requestedUrls = Array.isArray(body?.pageUrls)
+    ? [...new Set(body.pageUrls.filter((url): url is string => typeof url === "string"))]
+    : null;
+  if (requestedUrls !== null && requestedUrls.length > 2_000) {
+    res.status(400).json({ error: "too_many_urls", message: "A targeted crawl can include at most 2,000 URLs." });
+    return;
+  }
+  // Intersect with the authenticated property's stored inspection rows. The
+  // client may narrow the reason filter further with a URL search, but it
+  // cannot use this endpoint to make the worker fetch arbitrary URLs.
+  const seedUrls = (requestedUrls ?? [...matchingUrls]).filter((url) => matchingUrls.has(url)).slice(0, 2_000);
+  if (seedUrls.length === 0) {
+    res.status(409).json({ error: "no_matching_urls", message: "No inspected URLs match this reason." });
+    return;
+  }
+
+  const allowedHosts = [...new Set(seedUrls.flatMap((url) => {
+    try { return [new URL(url).hostname.toLowerCase()]; } catch { return []; }
+  }))];
+  if (allowedHosts.length === 0) {
+    res.status(409).json({ error: "no_valid_urls", message: "The matching URLs could not be crawled." });
+    return;
+  }
+
+  const [crawl] = await db
+    .insert(crawls)
+    .values({
+      websiteId: row.website.id,
+      status: "QUEUED",
+      limits: {
+        ...DEFAULT_CRAWL_LIMITS,
+        maxPages: seedUrls.length,
+        maxDepth: 0,
+        allowedHosts,
+        seedUrls,
+      },
+    })
+    .returning();
+  await logAuditEvent({
+    entityType: "crawl",
+    entityId: crawl.id,
+    eventType: "crawl.targeted_from_gsc_reason",
+    metadata: { reason, urls: seedUrls.length },
+  });
+  res.status(201).json({ crawl, urlsQueued: seedUrls.length });
+});
+
 /** Per-URL totals over the stored window, best-performing first. */
 gscRouter.get("/metrics/:websiteId", async (req, res) => {
   const userId = req.userId as string;
@@ -363,6 +442,7 @@ gscRouter.get("/metrics/:websiteId", async (req, res) => {
   }
 
   const propertyId = row.property.id;
+  const searchType = req.query.type === "image" ? "image" : "web";
 
   // Clamped rather than rejected: a picker sending tomorrow's date should
   // still render, with the adjustment explained.
@@ -378,7 +458,7 @@ gscRouter.get("/metrics/:websiteId", async (req, res) => {
     // and say it may be partial -- the fetch that timed out still completes
     // in the background, so the next request for that range is usually warm.
     coverageFetch = await Promise.race([
-      ensureRangeData(req.userId as string, propertyId, row.property.siteUrl, range),
+      ensureRangeData(req.userId as string, propertyId, row.property.siteUrl, range, searchType),
       new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error("range fetch exceeded 25s")), RANGE_FETCH_TIMEOUT_MS),
       ),
@@ -394,8 +474,20 @@ gscRouter.get("/metrics/:websiteId", async (req, res) => {
     coverageFetch = { fetched: false, daysFetched: 0, rowsWritten: 0, failed: true };
   }
 
+  // Image Search can be substantially slower on large properties. Never
+  // make the default Web Search dashboard wait for it: warm its rows after
+  // this response has started, then the Image search toggle is ready when
+  // the user opens it. Its own request still fetches synchronously if the
+  // background run has not completed yet.
+  if (searchType === "web") {
+    void ensureRangeData(userId, propertyId, row.property.siteUrl, range, "image").catch((err) => {
+      console.warn("[gsc] background image sync failed:", err instanceof Error ? err.message : err);
+    });
+  }
+
   const inWindow = and(
     eq(gscPageMetrics.propertyId, propertyId),
+    eq(gscPageMetrics.searchType, searchType),
     sql`${gscPageMetrics.date} BETWEEN ${range.startDate}::date AND ${range.endDate}::date`,
   );
 
@@ -464,6 +556,7 @@ gscRouter.get("/metrics/:websiteId", async (req, res) => {
       .where(
         and(
           eq(gscBreakdowns.propertyId, propertyId),
+          eq(gscBreakdowns.searchType, searchType),
           eq(gscBreakdowns.windowStart, range.startDate),
           eq(gscBreakdowns.windowEnd, range.endDate),
         ),
@@ -483,13 +576,15 @@ gscRouter.get("/metrics/:websiteId", async (req, res) => {
         userCanonical: gscUrlInspections.userCanonical,
         lastCrawlTime: gscUrlInspections.lastCrawlTime,
         crawledAs: gscUrlInspections.crawledAs,
+        sitemaps: gscUrlInspections.sitemaps,
+        raw: gscUrlInspections.raw,
         inspectedAt: gscUrlInspections.inspectedAt,
       })
       .from(gscUrlInspections)
       .where(eq(gscUrlInspections.propertyId, propertyId))
       // Not-indexed first: those are the rows that need action.
       .orderBy(sql`CASE ${gscUrlInspections.verdict} WHEN 'FAIL' THEN 0 WHEN 'NEUTRAL' THEN 1 WHEN 'PARTIAL' THEN 2 ELSE 3 END`)
-      .limit(2000),
+      .limit(10000),
 
     // Rolled up server-side so the UI never has to count 2,000 rows to draw
     // a summary, and stays correct if the row list above is truncated.
@@ -511,7 +606,8 @@ gscRouter.get("/metrics/:websiteId", async (req, res) => {
       propertyType: row.property.propertyType,
       lastSyncedAt: row.property.lastSyncedAt,
     },
-    range: { ...range, latestAvailable: latestUsableDate() },
+    range: { ...range, latestAvailable: latestUsableDate(), provisionalStart: provisionalStartDate(range.endDate) },
+    searchType,
     fetchedLive: coverageFetch.fetched,
     partial: Boolean((coverageFetch as { failed?: boolean }).failed),
     totals: totals[0] ?? null,
@@ -520,6 +616,7 @@ gscRouter.get("/metrics/:websiteId", async (req, res) => {
     queries: breakdowns.filter((b) => b.dimension === "query"),
     devices: breakdowns.filter((b) => b.dimension === "device"),
     countries: breakdowns.filter((b) => b.dimension === "country"),
+    searchAppearances: breakdowns.filter((b) => b.dimension === "searchAppearance"),
     inspections,
     coverage,
   });
@@ -668,7 +765,7 @@ gscRouter.get("/sitemaps/:websiteId", async (req, res) => {
  *
  * The limit is capped at 25, not the inspect route's 2,000: each PSI call is
  * a full Lighthouse run on Google's side, and the unkeyed quota is small
- * enough that a big batch would mostly report `stoppedReason`.
+//  * enough that a big batch would mostly report `stoppedReason`.
  */
 gscRouter.post("/cwv/:websiteId/run", async (req, res) => {
   const userId = req.userId as string;
@@ -759,8 +856,8 @@ gscRouter.get("/mobile/:websiteId", async (req, res) => {
   }
   const [usability, cwv] = await Promise.all([getMobileUsability(websiteId), getWebVitalsRows(websiteId, "mobile")]);
   res.json({ ...usability, cwv });
+  
 });
-
 /** Latest Safe Browsing verdict, plus links to the GSC surfaces with no API. */
 gscRouter.get("/security/:websiteId", async (req, res) => {
   const userId = req.userId as string;

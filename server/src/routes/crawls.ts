@@ -116,6 +116,9 @@ crawlsRouter.get("/:id/pages", async (req, res) => {
    * meant "not in this page" -- indistinguishable from "not in this crawl".
    */
   const filters = [eq(pages.crawlId, id)];
+  if (req.query.noindex === "true") {
+    filters.push(eq(pages.noindex, true));
+  }
   if (search) {
     const like = `%${search}%`;
     filters.push(or(ilike(pages.url, like), ilike(pages.title, like))!);

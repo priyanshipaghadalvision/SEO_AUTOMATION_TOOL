@@ -13,6 +13,7 @@ export interface CrawlLimits {
   maxDepth: number;
   timeLimitMinutes: number;
   allowedHosts: string[];
+  seedUrls?: string[];
 }
 
 export interface CrawlStats {
@@ -261,12 +262,13 @@ export function cancelCrawl(crawlId: string) {
 
 export function getCrawlPages(
   crawlId: string,
-  opts?: { limit?: number; offset?: number; search?: string },
+  opts?: { limit?: number; offset?: number; search?: string; noindex?: boolean },
 ) {
   const params = new URLSearchParams();
   if (opts?.limit) params.set("limit", String(opts.limit));
   if (opts?.offset) params.set("offset", String(opts.offset));
   if (opts?.search) params.set("search", opts.search);
+  if (opts?.noindex) params.set("noindex", "true");
   const query = params.toString();
   return request<{
     pages: PageSummary[];
@@ -511,7 +513,7 @@ export function syncGscMetrics(websiteId: string) {
 
 /** One row of a non-page breakdown: a query, a device, or a country. */
 export interface GscBreakdownRow {
-  dimension: "query" | "device" | "country";
+  dimension: "query" | "device" | "country" | "searchAppearance";
   keyValue: string;
   clicks: number;
   impressions: number;
@@ -531,6 +533,14 @@ export interface GscTotals {
 
 export type GscVerdict = "PASS" | "PARTIAL" | "FAIL" | "NEUTRAL" | "VERDICT_UNSPECIFIED";
 
+export interface GscInspectionRaw {
+  inspectionResultLink?: string | null;
+  referringUrls?: string[];
+  richResults?: Record<string, unknown> | null;
+  amp?: Record<string, unknown> | null;
+  mobileUsability?: Record<string, unknown> | null;
+}
+
 export interface GscInspection {
   pageUrl: string;
   verdict: GscVerdict;
@@ -543,6 +553,8 @@ export interface GscInspection {
   userCanonical: string | null;
   lastCrawlTime: string | null;
   crawledAs: string | null;
+  sitemaps: string[] | null;
+  raw: GscInspectionRaw | null;
   inspectedAt: string;
 }
 
@@ -565,11 +577,20 @@ export function inspectGscUrls(websiteId: string, batchSize?: number) {
   });
 }
 
+export function crawlGscReason(websiteId: string, reason: string, pageUrls: string[]) {
+  return request<{ crawl: Crawl; urlsQueued: number }>(`/gsc/crawl-reason/${websiteId}`, {
+    method: "POST",
+    body: JSON.stringify({ reason, pageUrls }),
+  });
+}
+
 export interface GscDateRange {
   startDate: string;
   endDate: string;
   /** Newest day Google has settled data for (~3 days behind today). */
   latestAvailable: string;
+  /** Data on and after this date is fresh and can still be restated by Google. */
+  provisionalStart: string;
   /** Set when the requested range was narrowed, with the reason. */
   clampedReason: string | null;
 }
@@ -577,6 +598,7 @@ export interface GscDateRange {
 export interface GscMetricsResponse {
   property: { siteUrl: string; propertyType: string; lastSyncedAt: string | null };
   range: GscDateRange;
+  searchType: "web" | "image";
   /** True when this range wasn't stored and had to be pulled from Google. */
   fetchedLive: boolean;
   /** True when a live fetch failed and stored data is being shown instead. */
@@ -587,13 +609,16 @@ export interface GscMetricsResponse {
   queries: GscBreakdownRow[];
   devices: GscBreakdownRow[];
   countries: GscBreakdownRow[];
+  searchAppearances: GscBreakdownRow[];
   inspections: GscInspection[];
   /** Server-side rollup, correct even when the row list above is truncated. */
   coverage: Array<{ verdict: GscVerdict; coverageState: string | null; count: number }>;
 }
 
-export function getGscMetrics(websiteId: string, range?: { start: string; end: string }) {
-  const q = range ? `?start=${range.start}&end=${range.end}` : "";
+export function getGscMetrics(websiteId: string, range?: { start: string; end: string }, searchType: "web" | "image" = "web") {
+  const p = new URLSearchParams({ type: searchType });
+  if (range) { p.set("start", range.start); p.set("end", range.end); }
+  const q = `?${p.toString()}`;
   return request<GscMetricsResponse>(`/gsc/metrics/${websiteId}${q}`);
 }
 

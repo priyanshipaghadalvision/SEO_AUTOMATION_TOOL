@@ -66,7 +66,10 @@ const toVerdict = (v: string | undefined): Verdict =>
  * never sent traffic to. That ordering is deliberate: a page with traffic
  * being quietly dropped from the index is an emergency, while a zero-traffic
  * page that was never indexed is the more common question -- and both get
- * answered before the long tail of pages nobody visits.
+ * answered before the long tail of pages nobody visits. Crawl URLs include
+ * redirects and error responses too: those are exactly the excluded URLs the
+ * Page Indexing report counts, so restricting this to successful pages makes
+ * a "Check All" result systematically smaller than Search Console.
  */
 export async function inspectPropertyUrls(
   userId: string,
@@ -133,6 +136,13 @@ export async function inspectPropertyUrls(
       await recordAttempt(true);
       const status = result.indexStatusResult ?? {};
       const verdict = toVerdict(status.verdict);
+      const raw = {
+        inspectionResultLink: result.inspectionResultLink ?? null,
+        referringUrls: status.referringUrls ?? [],
+        richResults: result.richResultsResult ?? null,
+        amp: result.ampResult ?? null,
+        mobileUsability: result.mobileUsabilityResult ?? null,
+      };
 
       await db
         .insert(gscUrlInspections)
@@ -150,11 +160,7 @@ export async function inspectPropertyUrls(
           lastCrawlTime: status.lastCrawlTime ? new Date(status.lastCrawlTime) : null,
           crawledAs: status.crawledAs ?? null,
           sitemaps: status.sitemap ?? null,
-          raw: {
-            referringUrls: status.referringUrls ?? [],
-            richResults: result.richResultsResult ?? null,
-            amp: result.ampResult ?? null,
-          },
+          raw,
           inspectedAt: new Date(),
         })
         .onConflictDoUpdate({
@@ -171,6 +177,7 @@ export async function inspectPropertyUrls(
             lastCrawlTime: status.lastCrawlTime ? new Date(status.lastCrawlTime) : null,
             crawledAs: status.crawledAs ?? null,
             sitemaps: status.sitemap ?? null,
+            raw,
             inspectedAt: new Date(),
           },
         });
@@ -239,11 +246,12 @@ async function selectCandidates(propertyId: string, websiteId: string, limit: nu
 
       UNION
 
-      SELECT coalesce(p.final_url, p.url) AS page_url, 0 AS impressions
+      -- Inspect the requested URL, not its final redirect destination. Google
+      -- reports a redirect source as an excluded URL in its own right.
+      SELECT p.url AS page_url, 0 AS impressions
       FROM pages p
       JOIN crawls c ON c.id = p.crawl_id
       WHERE c.website_id = ${websiteId}
-        AND p.http_status BETWEEN 200 AND 299
     )
     SELECT c.page_url,
            max(c.impressions) AS impressions
@@ -265,9 +273,12 @@ async function countPending(propertyId: string, websiteId: string): Promise<numb
     WITH candidates AS (
       SELECT DISTINCT m.page_url FROM gsc_page_metrics m WHERE m.property_id = ${propertyId}
       UNION
-      SELECT DISTINCT coalesce(p.final_url, p.url) FROM pages p
+      -- Keep non-2xx URLs and redirect sources for the same reason as the
+      -- candidate query above: they are valid URL Inspection targets and are
+      -- part of Google's excluded-page total.
+      SELECT DISTINCT p.url FROM pages p
       JOIN crawls c ON c.id = p.crawl_id
-      WHERE c.website_id = ${websiteId} AND p.http_status BETWEEN 200 AND 299
+      WHERE c.website_id = ${websiteId}
     )
     SELECT count(*)::int AS n
     FROM candidates c

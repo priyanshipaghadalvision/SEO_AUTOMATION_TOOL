@@ -4,7 +4,7 @@ import { gscBreakdowns, gscPageMetrics } from "../db/schema.js";
 import { querySearchAnalytics } from "./client.js";
 import { toJoinKey } from "./joinKey.js";
 import type { DateRange } from "./dateRange.js";
-import { daysBetween } from "./dateRange.js";
+import { daysBetween, latestUsableDate, provisionalStartDate } from "./dateRange.js";
 
 /**
  * Makes sure the stored data actually covers a requested date range,
@@ -22,7 +22,8 @@ import { daysBetween } from "./dateRange.js";
 
 const MAX_ROWS = 100_000;
 const MAX_BREAKDOWN_ROWS = 5_000;
-const BREAKDOWN_DIMENSIONS = ["query", "device", "country"] as const;
+const BREAKDOWN_DIMENSIONS = ["query", "device", "country", "searchAppearance"] as const;
+export type SearchType = "web" | "image";
 
 export interface CoverageResult {
   /** True when Google had to be called. */
@@ -39,12 +40,12 @@ export interface CoverageResult {
  * every date" check would re-fetch such days forever. Comparing the stored
  * span against the requested span tolerates genuinely empty days inside it.
  */
-async function isCovered(propertyId: string, range: DateRange): Promise<boolean> {
+async function isCovered(propertyId: string, range: DateRange, searchType: SearchType): Promise<boolean> {
   const { rows } = await db.execute<{ first: string | null; last: string | null }>(sql`
     SELECT to_char(min(date), 'YYYY-MM-DD') AS first,
            to_char(max(date), 'YYYY-MM-DD') AS last
     FROM gsc_page_metrics
-    WHERE property_id = ${propertyId}
+    WHERE property_id = ${propertyId} AND search_type = ${searchType}::gsc_search_type
   `);
   const first = rows[0]?.first;
   const last = rows[0]?.last;
@@ -65,8 +66,13 @@ export async function ensureRangeData(
   propertyId: string,
   siteUrl: string,
   range: DateRange,
+  searchType: SearchType,
 ): Promise<CoverageResult> {
-  const needsPages = !(await isCovered(propertyId, range));
+  // `dataState: all` intentionally includes fresh, restatable days. Refresh
+  // a range touching those days even when it is already stored, otherwise a
+  // page view would freeze yesterday's preliminary figure forever.
+  const touchesProvisionalData = range.endDate >= provisionalStartDate(latestUsableDate());
+  const needsPages = !(await isCovered(propertyId, range, searchType)) || touchesProvisionalData;
   const [{ n: haveBreakdowns }] = (
     await db
       .select({ n: sql<number>`count(*)::int` })
@@ -74,13 +80,14 @@ export async function ensureRangeData(
       .where(
         and(
           eq(gscBreakdowns.propertyId, propertyId),
+          eq(gscBreakdowns.searchType, searchType),
           eq(gscBreakdowns.windowStart, range.startDate),
           eq(gscBreakdowns.windowEnd, range.endDate),
         ),
       )
   ) as [{ n: number }];
 
-  if (!needsPages && haveBreakdowns > 0) {
+  if (!needsPages && haveBreakdowns >= BREAKDOWN_DIMENSIONS.length) {
     return { fetched: false, daysFetched: 0, rowsWritten: 0 };
   }
 
@@ -88,56 +95,34 @@ export async function ensureRangeData(
 
   if (needsPages) {
     const rows = await querySearchAnalytics(userId, {
-      siteUrl,
-      startDate: range.startDate,
-      endDate: range.endDate,
-      dimensions: ["date", "page"],
-      maxRows: MAX_ROWS,
+      siteUrl, startDate: range.startDate, endDate: range.endDate,
+      dimensions: ["date", "page"], searchType, maxRows: MAX_ROWS,
     });
 
     const values = rows.flatMap((r) => {
       const [date, pageUrl] = r.keys;
       if (!date || !pageUrl) return [];
-      return [{
-        propertyId,
-        pageUrl,
-        normalizedUrl: toJoinKey(pageUrl),
-        date,
-        clicks: Math.round(r.clicks),
-        impressions: Math.round(r.impressions),
-        ctr: r.ctr,
-        position: r.position,
-      }];
+      return [{ propertyId, pageUrl, normalizedUrl: toJoinKey(pageUrl), date, searchType, clicks: Math.round(r.clicks), impressions: Math.round(r.impressions), ctr: r.ctr, position: r.position }];
     });
 
     const CHUNK = 1000;
     for (let i = 0; i < values.length; i += CHUNK) {
-      const written = await db
-        .insert(gscPageMetrics)
-        .values(values.slice(i, i + CHUNK))
-        .onConflictDoUpdate({
-          target: [gscPageMetrics.propertyId, gscPageMetrics.pageUrl, gscPageMetrics.date],
-          set: {
-            normalizedUrl: sql`excluded.normalized_url`,
-            clicks: sql`excluded.clicks`,
-            impressions: sql`excluded.impressions`,
-            ctr: sql`excluded.ctr`,
-            position: sql`excluded.position`,
-            fetchedAt: new Date(),
-          },
-        })
-        .returning({ id: gscPageMetrics.id });
+      const written = await db.insert(gscPageMetrics).values(values.slice(i, i + CHUNK)).onConflictDoUpdate({
+        target: [gscPageMetrics.propertyId, gscPageMetrics.pageUrl, gscPageMetrics.date, gscPageMetrics.searchType],
+        set: { normalizedUrl: sql`excluded.normalized_url`, clicks: sql`excluded.clicks`, impressions: sql`excluded.impressions`, ctr: sql`excluded.ctr`, position: sql`excluded.position`, fetchedAt: new Date() },
+      }).returning({ id: gscPageMetrics.id });
       rowsWritten += written.length;
     }
   }
 
-  if (haveBreakdowns === 0) {
+  if (touchesProvisionalData || haveBreakdowns < BREAKDOWN_DIMENSIONS.length) {
     for (const dimension of BREAKDOWN_DIMENSIONS) {
       const rows = await querySearchAnalytics(userId, {
         siteUrl,
         startDate: range.startDate,
         endDate: range.endDate,
         dimensions: [dimension],
+        searchType,
         maxRows: MAX_BREAKDOWN_ROWS,
       });
 
@@ -147,6 +132,7 @@ export async function ensureRangeData(
         return [{
           propertyId,
           dimension,
+          searchType,
           keyValue,
           windowStart: range.startDate,
           windowEnd: range.endDate,
@@ -166,6 +152,7 @@ export async function ensureRangeData(
             target: [
               gscBreakdowns.propertyId,
               gscBreakdowns.dimension,
+              gscBreakdowns.searchType,
               gscBreakdowns.keyValue,
               gscBreakdowns.windowStart,
               gscBreakdowns.windowEnd,

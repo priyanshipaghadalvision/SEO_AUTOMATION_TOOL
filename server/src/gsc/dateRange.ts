@@ -8,8 +8,10 @@
  * and the clamp is reported rather than applied silently.
  */
 
-/** Search Console data is not settled for ~3 days. */
-export const DATA_LAG_DAYS = 3;
+/** `dataState: all` normally makes yesterday available. */
+export const DATA_LAG_DAYS = 1;
+/** Google can still restate the newest two reported days. */
+export const PROVISIONAL_DAYS = 2;
 /** Google retains 16 months of Search Analytics history. */
 export const MAX_HISTORY_DAYS = 16 * 30;
 
@@ -31,6 +33,11 @@ const isValid = (s: string | undefined): s is string =>
 /** The newest day that can hold settled data. */
 export function latestUsableDate(): string {
   return iso(new Date(Date.now() - DATA_LAG_DAYS * 86_400_000));
+}
+
+/** First date that should be labelled provisional in a range ending today-1. */
+export function provisionalStartDate(endDate: string): string {
+  return iso(new Date(parse(endDate).getTime() - (PROVISIONAL_DAYS - 1) * 86_400_000));
 }
 
 export function defaultRange(days = 28): DateRange {
@@ -63,7 +70,7 @@ export function resolveRange(start: string | undefined, end: string | undefined,
   const latest = latestUsableDate();
   if (parse(endDate) > parse(latest)) {
     endDate = latest;
-    notes.push(`Search Console data is ~${DATA_LAG_DAYS} days behind, so the end date moved to ${latest}`);
+    notes.push(`Search Console data is usually available the next day, so the end date moved to ${latest}`);
   }
 
   const earliest = iso(new Date(parse(latest).getTime() - MAX_HISTORY_DAYS * 86_400_000));

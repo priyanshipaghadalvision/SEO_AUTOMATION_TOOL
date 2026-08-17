@@ -18,7 +18,7 @@ const DEFAULT_SYNC_DAYS = 28;
  * window before then means stored rows are settled figures rather than
  * provisional ones that quietly change later.
  */
-const DATA_LAG_DAYS = 3;
+const DATA_LAG_DAYS = 1;
 
 /** Ceiling on rows per sync, so one enormous property can't run unbounded. */
 const MAX_ROWS = 100_000;
@@ -32,8 +32,10 @@ const MAX_ROWS = 100_000;
  */
 const MAX_BREAKDOWN_ROWS = 5_000;
 
-const BREAKDOWN_DIMENSIONS = ["query", "device", "country"] as const;
+const BREAKDOWN_DIMENSIONS = ["query", "device", "country", "searchAppearance"] as const;
 type BreakdownDimension = (typeof BREAKDOWN_DIMENSIONS)[number];
+const SEARCH_TYPES = ["web", "image"] as const;
+type SearchType = (typeof SEARCH_TYPES)[number];
 
 export interface SyncResult extends Record<string, unknown> {
   siteUrl: string;
@@ -75,65 +77,32 @@ export async function syncPropertyMetrics(userId: string, websiteId: string): Pr
   const days = Number(process.env.GSC_SYNC_DAYS) || DEFAULT_SYNC_DAYS;
   const { startDate, endDate } = dateWindow(days);
 
-  const rows = await querySearchAnalytics(userId, {
-    siteUrl: property.siteUrl,
-    startDate,
-    endDate,
-    dimensions: ["date", "page"],
-    maxRows: MAX_ROWS,
-  });
-
   let rowsWritten = 0;
   let totalClicks = 0;
   let totalImpressions = 0;
   const pages = new Set<string>();
 
-  const values = rows.flatMap((r) => {
-    const [date, pageUrl] = r.keys;
-    // Defensive: a row missing either dimension can't be keyed or upserted.
-    if (!date || !pageUrl) return [];
-    pages.add(pageUrl);
-    totalClicks += r.clicks;
-    totalImpressions += r.impressions;
-    return [{
-      propertyId: property.id,
-      pageUrl,
-      normalizedUrl: toJoinKey(pageUrl),
-      date,
-      clicks: Math.round(r.clicks),
-      impressions: Math.round(r.impressions),
-      ctr: r.ctr,
-      position: r.position,
-    }];
-  });
-
-  // Chunked: Postgres caps a statement at 65535 bind parameters, and seven
-  // columns per row means ~9000 rows would hit it.
-  const CHUNK = 1000;
-  for (let i = 0; i < values.length; i += CHUNK) {
-    const written = await db
-      .insert(gscPageMetrics)
-      .values(values.slice(i, i + CHUNK))
-      .onConflictDoUpdate({
-        target: [gscPageMetrics.propertyId, gscPageMetrics.pageUrl, gscPageMetrics.date],
-        set: {
-          clicks: sql`excluded.clicks`,
-          impressions: sql`excluded.impressions`,
-          ctr: sql`excluded.ctr`,
-          position: sql`excluded.position`,
-          fetchedAt: new Date(),
-        },
-      })
-      .returning({ id: gscPageMetrics.id });
-    rowsWritten += written.length;
-  }
-
-  // Queries, devices and countries. Sequential rather than parallel: these
+  // Search types and breakdowns are intentionally pulled sequentially: they
+  // share one property rate limit, and an image-enabled sync is still small.
   // hit the same per-property rate limit as the page pull, and three extra
   // requests spread out cost nothing next to one 429 and its backoff.
   const breakdowns: Record<string, number> = {};
-  for (const dimension of BREAKDOWN_DIMENSIONS) {
-    breakdowns[dimension] = await syncBreakdown(userId, property.id, property.siteUrl, dimension, startDate, endDate);
+  let rowsFetched = 0;
+  for (const searchType of SEARCH_TYPES) {
+    const rows = await querySearchAnalytics(userId, { siteUrl: property.siteUrl, startDate, endDate, dimensions: ["date", "page"], searchType, maxRows: MAX_ROWS });
+    rowsFetched += rows.length;
+    const values = rows.flatMap((r) => {
+      const [date, pageUrl] = r.keys;
+      if (!date || !pageUrl) return [];
+      pages.add(pageUrl);
+      totalClicks += r.clicks;
+      totalImpressions += r.impressions;
+      return [{ propertyId: property.id, pageUrl, normalizedUrl: toJoinKey(pageUrl), date, searchType, clicks: Math.round(r.clicks), impressions: Math.round(r.impressions), ctr: r.ctr, position: r.position }];
+    });
+    rowsWritten += await upsertPageMetrics(values);
+    for (const dimension of BREAKDOWN_DIMENSIONS) {
+      breakdowns[`${searchType}:${dimension}`] = await syncBreakdown(userId, property.id, property.siteUrl, searchType, dimension, startDate, endDate);
+    }
   }
 
   await db
@@ -145,7 +114,7 @@ export async function syncPropertyMetrics(userId: string, websiteId: string): Pr
     siteUrl: property.siteUrl,
     startDate,
     endDate,
-    rowsFetched: rows.length,
+    rowsFetched,
     rowsWritten,
     pages: pages.size,
     totalClicks,
@@ -165,6 +134,7 @@ async function syncBreakdown(
   userId: string,
   propertyId: string,
   siteUrl: string,
+  searchType: SearchType,
   dimension: BreakdownDimension,
   startDate: string,
   endDate: string,
@@ -174,6 +144,7 @@ async function syncBreakdown(
     startDate,
     endDate,
     dimensions: [dimension],
+    searchType,
     maxRows: MAX_BREAKDOWN_ROWS,
   });
 
@@ -183,6 +154,7 @@ async function syncBreakdown(
     return [{
       propertyId,
       dimension,
+      searchType,
       keyValue,
       windowStart: startDate,
       windowEnd: endDate,
@@ -203,6 +175,7 @@ async function syncBreakdown(
         target: [
           gscBreakdowns.propertyId,
           gscBreakdowns.dimension,
+          gscBreakdowns.searchType,
           gscBreakdowns.keyValue,
           gscBreakdowns.windowStart,
           gscBreakdowns.windowEnd,
@@ -219,6 +192,19 @@ async function syncBreakdown(
     written += result.length;
   }
 
+  return written;
+}
+
+async function upsertPageMetrics(values: Array<{ propertyId: string; pageUrl: string; normalizedUrl: string | null; date: string; searchType: SearchType; clicks: number; impressions: number; ctr: number; position: number }>): Promise<number> {
+  let written = 0;
+  const CHUNK = 1000;
+  for (let i = 0; i < values.length; i += CHUNK) {
+    const result = await db.insert(gscPageMetrics).values(values.slice(i, i + CHUNK)).onConflictDoUpdate({
+      target: [gscPageMetrics.propertyId, gscPageMetrics.pageUrl, gscPageMetrics.date, gscPageMetrics.searchType],
+      set: { normalizedUrl: sql`excluded.normalized_url`, clicks: sql`excluded.clicks`, impressions: sql`excluded.impressions`, ctr: sql`excluded.ctr`, position: sql`excluded.position`, fetchedAt: new Date() },
+    }).returning({ id: gscPageMetrics.id });
+    written += result.length;
+  }
   return written;
 }
 

@@ -246,28 +246,14 @@ export async function runCrawl(website: WebsiteRow, crawl: CrawlRow): Promise<vo
       .onConflictDoNothing({ target: [pages.crawlId, pages.normalizedUrl] });
   }
 
-  // Seed: homepage + sitemap URLs, capped by maxPages. addRequest is a no-op
-  // (wasAlreadyPresent: true) if the URL is already known to the queue, so
-  // stats never double-count if seeding somehow runs twice against the same
-  // queue.
-  // Normalised like every other URL, not passed through raw: the origin has
-  // no trailing slash while an in-page link to "/" resolves with one, so an
-  // un-normalised seed makes the homepage get crawled and stored twice and
-  // then reported as duplicate content. Caught by the duplicate detector.
-  const homepageSeed = normalizePageUrl(originUrl, originUrl);
-  const homepageKey = homepageSeed?.normalizedUrl ?? originUrl;
-  const homepageAdded = await untilSetupDeadline(
-    queue.addRequest({
-      url: homepageSeed?.url ?? originUrl,
-      uniqueKey: homepageKey,
-      userData: { depth: 0 },
-    }),
-  );
-  if (!homepageAdded.wasAlreadyPresent) stats.discovered += 1;
-
+  // A targeted crawl must fetch exactly its supplied URLs. A normal crawl
+  // starts at the homepage and sitemap as before. Both paths share the same
+  // queue and URL normalisation, so recorded page data stays identical.
+  const targetedSeeds = crawl.limits.seedUrls ?? [];
+  const seeds = targetedSeeds.length > 0 ? targetedSeeds : [originUrl, ...sitemapUrls];
   let seedAssetsSkipped = 0;
-  const seenSeeds = new Set<string>([homepageKey]);
-  for (const raw of sitemapUrls) {
+  const seenSeeds = new Set<string>();
+  for (const raw of seeds) {
     if (stats.discovered >= crawl.limits.maxPages) {
       stats.skipped += 1;
       continue;
@@ -286,14 +272,15 @@ export async function runCrawl(website: WebsiteRow, crawl: CrawlRow): Promise<vo
       queue.addRequest({
         url: normalized.url,
         uniqueKey: normalized.normalizedUrl,
-        userData: { depth: 1 },
+        // Targeted jobs must not follow links beyond their selected URLs.
+        userData: { depth: targetedSeeds.length > 0 || raw === originUrl ? 0 : 1 },
       }),
     );
     if (!added.wasAlreadyPresent) stats.discovered += 1;
   }
   await flushStats(true);
   log(
-    `[3/4] seeded ${stats.discovered} URL(s) into the queue` +
+    `[3/4] seeded ${stats.discovered} ${targetedSeeds.length > 0 ? "target " : ""}URL(s) into the queue` +
       (seedAssetsSkipped > 0 ? ` (${seedAssetsSkipped} asset URL(s) filtered out)` : ""),
   );
 

@@ -156,9 +156,11 @@ export interface IndexStatusResult {
 }
 
 export interface UrlInspectionResult {
+  inspectionResultLink?: string;
   indexStatusResult?: IndexStatusResult;
   richResultsResult?: Record<string, unknown>;
   ampResult?: Record<string, unknown>;
+  mobileUsabilityResult?: Record<string, unknown>;
 }
 
 /**
@@ -192,6 +194,8 @@ export interface SearchAnalyticsQuery {
   startDate: string;
   endDate: string;
   dimensions: string[];
+  /** Google Search vertical. Image results are a separate data set from web. */
+  searchType?: "web" | "image";
   /** Stop after this many rows overall, across pages. */
   maxRows?: number;
 }
@@ -200,10 +204,9 @@ export interface SearchAnalyticsQuery {
  * Runs a Search Analytics query, following pagination until the API runs out
  * of rows or `maxRows` is reached.
  *
- * `dataState: "final"` asks for settled figures only. Search Console restates
- * the most recent days for a while after the fact, and mixing provisional
- * numbers into stored history would make a "did this fix work?" comparison
- * shift under its own feet.
+ * `dataState: "all"` includes Google's freshest available numbers. The
+ * caller marks the newest two days provisional because Google may restate
+ * them before they become final.
  */
 export async function querySearchAnalytics(
   userId: string,
@@ -222,8 +225,8 @@ export async function querySearchAnalytics(
         startDate: query.startDate,
         endDate: query.endDate,
         dimensions: query.dimensions,
-        type: "web",
-        dataState: "final",
+        type: query.searchType ?? "web",
+        dataState: "all",
         rowLimit,
         startRow,
       }),

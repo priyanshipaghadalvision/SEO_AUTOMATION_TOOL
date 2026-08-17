@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import type {
   CoverageReasonRow,
   CoverageResponse,
+  Crawl,
   CwvRow,
   EnhancementsResponse,
   GscBreakdownRow,
@@ -11,10 +12,13 @@ import type {
   GscPageMetric,
   GscSitemapsResponse,
   GscVerdict,
+  Issue,
   LinkDomainRow,
   LinkPageRow,
   MobileUsabilityResponse,
+  Optimization,
   OrphanRow,
+  PageSummary,
   SecurityStatusResponse,
   SiteLinksResponse,
   SitemapRow,
@@ -23,6 +27,11 @@ import type {
 } from "../api/client";
 import {
   getCoverage,
+  getCrawl,
+  getCrawlIssues,
+  getCrawlOptimizations,
+  getCrawlPages,
+  crawlGscReason,
   getGscEnhancements,
   getGscMetrics,
   getGscSitemaps,
@@ -87,7 +96,6 @@ const INSIGHT_TABS: ReadonlySet<GscTab> = new Set([
   "vitals",
   "sitemaps",
   "links",
-  "enhancements",
   "mobile",
   "security",
   "coverage",
@@ -137,6 +145,7 @@ export function GscDataPanel({
   // is -- guessing it client-side would drift from the server's clamp.
   const [range, setRange] = useState<Range | null>(null);
   const [rangeBusy, setRangeBusy] = useState(false);
+  const [searchType, setSearchType] = useState<"web" | "image">("web");
 
   const insightTab = INSIGHT_TABS.has(tab);
 
@@ -150,7 +159,7 @@ export function GscDataPanel({
     if (range) setRangeBusy(true);
     setError(null);
 
-    getGscMetrics(websiteId, range ? { start: range.start, end: range.end } : undefined)
+    getGscMetrics(websiteId, range ? { start: range.start, end: range.end } : undefined, searchType)
       .then((res) => {
         if (cancelled) return;
         setData(res);
@@ -176,11 +185,11 @@ export function GscDataPanel({
     // re-fetch on every render, and adopting the server's range would loop.
     // `insightTab` is a dep so that leaving an insight tab starts the fetch
     // that was skipped while it was active.
-  }, [websiteId, range?.start, range?.end, insightTab]);
+  }, [websiteId, range?.start, range?.end, insightTab, searchType]);
 
   /** Re-reads everything after an inspection batch adds rows. */
   async function reload() {
-    setData(await getGscMetrics(websiteId, range ? { start: range.start, end: range.end } : undefined));
+    setData(await getGscMetrics(websiteId, range ? { start: range.start, end: range.end } : undefined, searchType));
   }
 
   // Clearing the filter when switching tabs avoids the confusing state where
@@ -197,7 +206,6 @@ export function GscDataPanel({
           {tab === "vitals" && <VitalsTab websiteId={websiteId} />}
           {tab === "sitemaps" && <SitemapsTab websiteId={websiteId} />}
           {tab === "links" && <LinksTab websiteId={websiteId} />}
-          {tab === "enhancements" && <EnhancementsTab websiteId={websiteId} />}
           {tab === "mobile" && <MobileTab websiteId={websiteId} />}
           {tab === "security" && <SecurityTab websiteId={websiteId} />}
           {tab === "coverage" && <CoverageTab websiteId={websiteId} />}
@@ -214,12 +222,21 @@ export function GscDataPanel({
           {data?.totals?.firstDate && ` · ${data.totals.firstDate} to ${data.totals.lastDate}`}
         </p>
         {data && (
-          <DateRangePicker
-            value={range ?? { start: data.range.startDate, end: data.range.endDate }}
-            latestAvailable={data.range.latestAvailable}
-            busy={rangeBusy}
-            onChange={setRange}
-          />
+          <div className="gsc-panel-controls">
+            <div className="gsc-search-type-toggle" role="group" aria-label="Google Search type">
+              {(["web", "image"] as const).map((type) => (
+                <button key={type} type="button" className={searchType === type ? "active" : ""} onClick={() => setSearchType(type)} disabled={rangeBusy}>
+                  {type === "web" ? "Web" : "Image search"}
+                </button>
+              ))}
+            </div>
+            <DateRangePicker
+              value={range ?? { start: data.range.startDate, end: data.range.endDate }}
+              latestAvailable={data.range.latestAvailable}
+              busy={rangeBusy}
+              onChange={setRange}
+            />
+          </div>
         )}
       </div>
 
@@ -232,74 +249,80 @@ export function GscDataPanel({
           period.
         </p>
       )}
+      {data && (
+        <p className="small gsc-provisional-note">
+          Fresh data from {data.range.provisionalStart} to {data.range.endDate} is provisional and may be restated by Google.
+        </p>
+      )}
 
       <div className="gsc-panel-body">
-          {loading && <p className="muted small">Loading Search Console data&hellip;</p>}
-          {rangeBusy && !loading && (
-            <p className="muted small">Loading {range?.start} to {range?.end}&hellip;</p>
-          )}
-          {error && <p className="error-text">{error}</p>}
+        {loading && <p className="muted small">Loading Search Console data&hellip;</p>}
+        {rangeBusy && !loading && (
+          <p className="muted small">Loading {range?.start} to {range?.end}&hellip;</p>
+        )}
+        {error && <p className="error-text">{error}</p>}
 
-          {data && !loading && !data.totals?.impressions && tab !== "indexing" && (
-            <p className="muted small">
-              No data stored yet for this property. Hit <strong>Sync</strong> on the Search Console card first.
-            </p>
-          )}
+        {data && !loading && !data.totals?.impressions && tab !== "indexing" && (
+          <p className="muted small">
+            No data stored yet for this property. Hit <strong>Sync</strong> on the Search Console card first.
+          </p>
+        )}
 
-          {/* Indexing works with no traffic data at all -- a site with zero
+        {/* Indexing works with no traffic data at all -- a site with zero
               impressions is exactly the case where "why isn't this indexed"
               matters most, so this tab renders regardless. */}
-          {data && !loading && tab === "indexing" && (
-            <IndexingTab websiteId={websiteId} data={data} onRefresh={reload} />
-          )}
+        {data && !loading && tab === "indexing" && (
+          <IndexingTab websiteId={websiteId} data={data} onRefresh={reload} />
+        )}
 
-          {data && !loading && !!data.totals?.impressions && (
-            <>
-              {tab === "overview" && <Overview data={data} />}
+        {data && !loading && !!data.totals?.impressions && (
+          <>
+            {tab === "overview" && <Overview data={data} />}
 
-              {tab === "pages" && (
+            {tab === "pages" && (
+              <FilteredTable
+                placeholder="Filter by URL…"
+                value={search}
+                onChange={setSearch}
+                total={data.pages.length}
+                noun="page"
+                plural="pages"
+                head="Page"
+                rows={filterRows(data.pages, search, (p) => p.pageUrl).map((p) => ({
+                  key: p.pageUrl,
+                  label: p.pageUrl,
+                  href: p.pageUrl,
+                  ...p,
+                }))}
+              />
+            )}
+
+            {tab === "queries" &&
+              (data.queries.length === 0 ? (
+                <p className="muted small">
+                  No query data stored. Re-run <strong>Sync</strong> — queries were added after your last sync.
+                </p>
+              ) : (
                 <FilteredTable
-                  placeholder="Filter by URL…"
+                  placeholder="Filter by search term…"
                   value={search}
                   onChange={setSearch}
-                  total={data.pages.length}
-                  noun="page"
-                  plural="pages"
-                  head="Page"
-                  rows={filterRows(data.pages, search, (p) => p.pageUrl).map((p) => ({
-                    key: p.pageUrl,
-                    label: p.pageUrl,
-                    href: p.pageUrl,
-                    ...p,
+                  total={data.queries.length}
+                  noun="query"
+                  plural="queries"
+                  head="Search query"
+                  rows={filterRows(data.queries, search, (q) => q.keyValue).map((q) => ({
+                    key: q.keyValue,
+                    label: q.keyValue,
+                    ...q,
                   }))}
                 />
-              )}
+              ))}
 
-              {tab === "queries" &&
-                (data.queries.length === 0 ? (
-                  <p className="muted small">
-                    No query data stored. Re-run <strong>Sync</strong> — queries were added after your last sync.
-                  </p>
-                ) : (
-                  <FilteredTable
-                    placeholder="Filter by search term…"
-                    value={search}
-                    onChange={setSearch}
-                    total={data.queries.length}
-                    noun="query"
-                    plural="queries"
-                    head="Search query"
-                    rows={filterRows(data.queries, search, (q) => q.keyValue).map((q) => ({
-                      key: q.keyValue,
-                      label: q.keyValue,
-                      ...q,
-                    }))}
-                  />
-                ))}
-
-              {tab === "segments" && <Segments devices={data.devices} countries={data.countries} />}
-            </>
-          )}
+            {tab === "segments" && <Segments devices={data.devices} countries={data.countries} />}
+          </>
+        )}
+        {data && !loading && tab === "enhancements" && <EnhancementsTab websiteId={websiteId} searchAppearances={data.searchAppearances} searchType={data.searchType} />}
       </div>
     </div>
   );
@@ -324,14 +347,17 @@ function IndexingTab({
   const [running, setRunning] = useState(false);
   const [run, setRun] = useState<GscInspectionRunResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [targetedCrawl, setTargetedCrawl] = useState<{ urlsQueued: number; crawlId: string } | null>(null);
+  const [targetedCrawlBusy, setTargetedCrawlBusy] = useState(false);
   const [filter, setFilter] = useState<GscVerdict | "all">("all");
+  const [reasonFilter, setReasonFilter] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [inspOffset, setInspOffset] = useState(0);
   const [inspPageSize, setInspPageSize] = useState(ROW_LIMIT);
 
   // A verdict card or a search term changes which rows exist, so the page
   // number has to restart or it lands past the end of the new list.
-  useEffect(() => setInspOffset(0), [filter, search]);
+  useEffect(() => setInspOffset(0), [filter, reasonFilter, search]);
 
   async function inspect(batchSize: number) {
     setRunning(true);
@@ -346,11 +372,32 @@ function IndexingTab({
     }
   }
 
+  async function crawlExcludedUrls() {
+    setTargetedCrawlBusy(true);
+    setError(null);
+    try {
+      if (reasonFilter === null) return;
+      const result = await crawlGscReason(websiteId, reasonFilter, rows.map((row) => row.pageUrl));
+      setTargetedCrawl({ urlsQueued: result.urlsQueued, crawlId: result.crawl.id });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not queue the targeted crawl.");
+    } finally {
+      setTargetedCrawlBusy(false);
+    }
+  }
+
   const byVerdict = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const c of data.coverage) counts[c.verdict] = (counts[c.verdict] ?? 0) + c.count;
     return counts;
   }, [data.coverage]);
+
+  // Search Console's Page Indexing report has two headline totals, while the
+  // URL Inspection API gives us four verdicts. Keep the arithmetic visible so
+  // a clean PASS count is never mistaken for Google's complete "Indexed"
+  // total: PARTIAL URLs are indexed too, and NEUTRAL URLs are excluded.
+  const gscIndexed = (byVerdict.PASS ?? 0) + (byVerdict.PARTIAL ?? 0);
+  const gscNotIndexed = (byVerdict.FAIL ?? 0) + (byVerdict.NEUTRAL ?? 0);
 
   // Reasons, most common first -- the actionable summary of "why not indexed".
   const reasons = useMemo(
@@ -366,39 +413,54 @@ function IndexingTab({
     const q = search.trim().toLowerCase();
     return data.inspections
       .filter((i) => filter === "all" || i.verdict === filter)
+      .filter((i) => reasonFilter === null || i.coverageState === reasonFilter)
       .filter((i) => !q || i.pageUrl.toLowerCase().includes(q) || (i.coverageState ?? "").toLowerCase().includes(q));
-  }, [data.inspections, filter, search]);
+  }, [data.inspections, filter, reasonFilter, search]);
 
   const total = data.inspections.length;
+  const selectedReason = reasons.find((reason) => reason.coverageState === reasonFilter) ?? null;
+  const canCrawlSelectedReason = selectedReason?.verdict === "NEUTRAL" && rows.length > 0;
 
   return (
     <div className="gsc-overview">
       <div className="gsc-index-toolbar">
-        <div className="gsc-verdict-cards">
-          {(["PASS", "FAIL", "NEUTRAL", "PARTIAL"] as GscVerdict[]).map((v) => (
-            <button
-              key={v}
-              type="button"
-              className={`gsc-verdict-card gsc-verdict-${v.toLowerCase()}${filter === v ? " gsc-verdict-active" : ""}`}
-              onClick={() => setFilter(filter === v ? "all" : v)}
-            >
-              <span className="gsc-verdict-count">{(byVerdict[v] ?? 0).toLocaleString()}</span>
-              <span className="gsc-verdict-label">{VERDICT_LABEL[v]}</span>
-            </button>
-          ))}
+        <div>
+          <div className="gsc-index-totals" aria-label="Search Console equivalent totals">
+            <span>
+              Inspected indexed: <strong>{gscIndexed.toLocaleString()}</strong>
+              <small> ({(byVerdict.PASS ?? 0).toLocaleString()} clean + {(byVerdict.PARTIAL ?? 0).toLocaleString()} with issues)</small>
+            </span>
+            <span>
+              Inspected not indexed: <strong>{gscNotIndexed.toLocaleString()}</strong>
+              <small> ({(byVerdict.FAIL ?? 0).toLocaleString()} not indexed + {(byVerdict.NEUTRAL ?? 0).toLocaleString()} excluded)</small>
+            </span>
+          </div>
+          <div className="gsc-verdict-cards">
+            {(["PASS", "PARTIAL", "FAIL", "NEUTRAL"] as GscVerdict[]).map((v) => (
+              <button
+                key={v}
+                type="button"
+                className={`gsc-verdict-card gsc-verdict-${v.toLowerCase()}${filter === v ? " gsc-verdict-active" : ""}`}
+                onClick={() => setFilter(filter === v ? "all" : v)}
+              >
+                <span className="gsc-verdict-count">{(byVerdict[v] ?? 0).toLocaleString()}</span>
+                <span className="gsc-verdict-label">{VERDICT_LABEL[v]}</span>
+              </button>
+            ))}
+          </div>
         </div>
         <div className="gsc-index-actions">
-          <button type="button" className="btn btn-primary btn-sm" disabled={running} onClick={() => inspect(1000)}>
+          <button type="button" className="btn btn-primary btn-sm" disabled={running} onClick={() => inspect(50)}>
             {running ? (
               <>
                 <SpinnerIcon /> Inspecting&hellip;
               </>
             ) : (
-              "Check 50 URLs"
+              "Check 1000 URLs"
             )}
           </button>
           <button type="button" className="btn btn-ghost btn-sm" disabled={running} onClick={() => inspect(2000)}>
-            Check All
+            Check 2000
           </button>
         </div>
       </div>
@@ -445,8 +507,13 @@ function IndexingTab({
               </thead>
               <tbody>
                 {reasons.map((r) => (
-                  <tr key={`${r.verdict}-${r.coverageState}`}>
-                    <td className="gsc-cell-label" title={r.coverageState ?? ""}>{r.coverageState}</td>
+                  <tr
+                    key={`${r.verdict}-${r.coverageState}`}
+                    className={`gsc-reason-row${reasonFilter === r.coverageState ? " gsc-reason-row-active" : ""}`}
+                    onClick={() => setReasonFilter(reasonFilter === r.coverageState ? null : r.coverageState)}
+                    title={`Show URLs with: ${r.coverageState}`}
+                  >
+                    <td className="gsc-cell-label">{r.coverageState}</td>
                     <td className="gsc-cell-label">
                       <span className={`gsc-verdict-chip gsc-verdict-${r.verdict.toLowerCase()}`}>
                         {VERDICT_LABEL[r.verdict]}
@@ -468,7 +535,18 @@ function IndexingTab({
               {rows.length.toLocaleString()} of {total.toLocaleString()} checked URL
               {total === 1 ? "" : "s"}
               {filter !== "all" && ` · ${VERDICT_LABEL[filter]}`}
+              {reasonFilter !== null && ` · ${reasonFilter}`}
             </span>
+            {reasonFilter !== null && (
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setReasonFilter(null)}>
+                Clear reason filter
+              </button>
+            )}
+            {canCrawlSelectedReason && (
+              <button type="button" className="btn btn-primary btn-sm" disabled={targetedCrawlBusy} onClick={crawlExcludedUrls}>
+                {targetedCrawlBusy ? "Queuing crawl…" : `Crawl ${rows.length.toLocaleString()} URL${rows.length === 1 ? "" : "s"}`}
+              </button>
+            )}
             <input
               type="text"
               className="panel-search"
@@ -477,6 +555,9 @@ function IndexingTab({
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
+          {targetedCrawl && (
+            <TargetedCrawlResults crawlId={targetedCrawl.crawlId} urlsQueued={targetedCrawl.urlsQueued} />
+          )}
           <div className="gsc-table-wrap">
             <table className="gsc-metric-table gsc-index-table">
               <thead>
@@ -485,6 +566,7 @@ function IndexingTab({
                   <th style={{ width: 130 }}>Status</th>
                   <th>Reason</th>
                   <th style={{ width: 150 }}>Google&rsquo;s canonical</th>
+                  <th style={{ width: 180 }}>Details</th>
                   <th style={{ width: 110 }}>Last crawled</th>
                 </tr>
               </thead>
@@ -652,11 +734,87 @@ function InspectionRow({ row }: { row: GscInspection }) {
           <span className="muted">same</span>
         )}
       </td>
+      <td className="gsc-inspection-details">
+        <InspectionDetails row={row} />
+      </td>
       <td className="muted small nowrap">
         {row.lastCrawlTime ? new Date(row.lastCrawlTime).toLocaleDateString() : "never"}
       </td>
     </tr>
   );
+}
+
+function InspectionDetails({ row }: { row: GscInspection }) {
+  const raw = row.raw ?? {};
+  const referringUrls = Array.isArray(raw.referringUrls) ? raw.referringUrls : [];
+  const rich = raw.richResults ?? null;
+  const amp = raw.amp ?? null;
+  const mobile = raw.mobileUsability ?? null;
+  const richVerdict = typeof rich?.verdict === "string" ? rich.verdict : null;
+  const ampVerdict = typeof amp?.verdict === "string" ? amp.verdict : null;
+  const mobileVerdict = typeof mobile?.verdict === "string" ? mobile.verdict : null;
+  const richTypes = richResultTypes(rich);
+
+  return (
+    <details className="gsc-detail-panel">
+      <summary className="gsc-detail-chips">
+        <span title={(row.sitemaps ?? []).join("\n")}>Sitemaps {(row.sitemaps ?? []).length}</span>
+        <span title={referringUrls.join("\n")}>Refs {referringUrls.length}</span>
+        {richVerdict ? <span title={richTypes.join(", ") || richVerdict}>Rich {formatApiLabel(richVerdict)}</span> : <span>Rich none</span>}
+        {ampVerdict && <span>AMP {formatApiLabel(ampVerdict)}</span>}
+        {mobileVerdict && <span>Mobile {formatApiLabel(mobileVerdict)}</span>}
+      </summary>
+      <div className="gsc-detail-body">
+        <DetailList title="Sitemaps" values={row.sitemaps ?? []} />
+        <DetailList title="Referring URLs" values={referringUrls} />
+        {rich && <JsonDetail title="Rich results" value={rich} />}
+        {amp && <JsonDetail title="AMP" value={amp} />}
+        {mobile && <JsonDetail title="Mobile usability" value={mobile} />}
+      </div>
+      {raw.inspectionResultLink && (
+        <a className="gsc-detail-link" href={raw.inspectionResultLink} target="_blank" rel="noreferrer noopener">
+          Open in GSC
+        </a>
+      )}
+    </details>
+  );
+}
+
+function DetailList({ title, values }: { title: string; values: string[] }) {
+  return (
+    <div>
+      <strong>{title}</strong>
+      {values.length === 0 ? (
+        <p className="muted small">None reported by Google.</p>
+      ) : (
+        <ul className="gsc-detail-list">
+          {values.map((value) => (
+            <li key={value}>{value}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function JsonDetail({ title, value }: { title: string; value: Record<string, unknown> }) {
+  return (
+    <div>
+      <strong>{title}</strong>
+      <pre className="gsc-json-detail">{JSON.stringify(value, null, 2)}</pre>
+    </div>
+  );
+}
+
+function richResultTypes(rich: Record<string, unknown> | null): string[] {
+  const detectedItems = Array.isArray(rich?.detectedItems) ? rich.detectedItems : [];
+  return detectedItems
+    .map((item) => (typeof item === "object" && item && "richResultType" in item ? item.richResultType : null))
+    .filter((type): type is string => typeof type === "string" && type.length > 0);
+}
+
+function formatApiLabel(value: string): string {
+  return value.replace(/_/g, " ").toLowerCase();
 }
 
 function Overview({ data }: { data: GscMetricsResponse }) {
@@ -719,7 +877,7 @@ function TrendChart({ trend }: { trend: GscMetricsResponse["trend"] }) {
         <span className="muted small gsc-chart-note">each series scaled to its own peak</span>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} className="gsc-chart-svg" preserveAspectRatio="none" role="img"
-           aria-label={`Daily clicks and impressions from ${trend[0]?.date} to ${trend[trend.length - 1]?.date}`}>
+        aria-label={`Daily clicks and impressions from ${trend[0]?.date} to ${trend[trend.length - 1]?.date}`}>
         <path d={path((d) => d.impressions, maxImpr)} className="gsc-line gsc-line-impr" />
         <path d={path((d) => d.clicks, maxClicks)} className="gsc-line gsc-line-clicks" />
       </svg>
@@ -1148,7 +1306,7 @@ function VitalsTab({ websiteId }: { websiteId: string }) {
     setRunning(true);
     setError(null);
     try {
-      const result = await runWebVitals(websiteId, { limit: 1000 });
+      const result = await runWebVitals(websiteId, { limit: 2000 });
       setRun(result);
       setData(await getWebVitals(websiteId));
     } catch (err) {
@@ -1537,7 +1695,7 @@ function LinksTab({ websiteId }: { websiteId: string }) {
 }
 
 /** Structured-data coverage, aggregated from crawled JSON-LD by schema type. */
-function EnhancementsTab({ websiteId }: { websiteId: string }) {
+function EnhancementsTab({ websiteId, searchAppearances, searchType }: { websiteId: string; searchAppearances: GscBreakdownRow[]; searchType: "web" | "image" }) {
   const [data, setData] = useState<EnhancementsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1583,6 +1741,17 @@ function EnhancementsTab({ websiteId }: { websiteId: string }) {
 
       {data && !loading && (
         <>
+          <div className="gsc-tab-head">
+            <p className="muted small gsc-source-note">Google Search Console rich-result appearances in {searchType === "image" ? "Image search" : "Web search"}.</p>
+          </div>
+          {searchAppearances.length === 0 ? (
+            <p className="muted small">Google has not reported any search appearances for this date range yet.</p>
+          ) : (
+            <MetricTable
+              head="Search appearance"
+              rows={searchAppearances.map((row) => ({ key: row.keyValue, label: row.keyValue, ...row }))}
+            />
+          )}
           <div className="gsc-stat-cards">
             <StatCard value={data.totalPages.toLocaleString()} label="Crawled pages" />
             <StatCard
@@ -2124,5 +2293,203 @@ function CoverageRow({
         </tr>
       )}
     </>
+  );
+}
+
+function TargetedCrawlResults({ crawlId, urlsQueued }: { crawlId: string; urlsQueued: number }) {
+  const [crawl, setCrawl] = useState<Crawl | null>(null);
+  const [pages, setPages] = useState<PageSummary[]>([]);
+  const [issues, setIssues] = useState<Issue[]>([]);
+  const [optimizations, setOptimizations] = useState<Optimization[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [expandedUrl, setExpandedUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    let interval: ReturnType<typeof setInterval>;
+
+    async function poll() {
+      try {
+        const { crawl: current } = await getCrawl(crawlId);
+        if (!active) return;
+        setCrawl(current);
+
+        if (current.status === "COMPLETED" || current.status === "FAILED" || current.status === "CANCELLED") {
+          clearInterval(interval);
+
+          // Fetch results
+          const [pagesRes, issuesRes, optRes] = await Promise.all([
+            getCrawlPages(crawlId, { limit: 100 }),
+            getCrawlIssues(crawlId, { limit: 1000 }),
+            getCrawlOptimizations(crawlId, { limit: 1000 }),
+          ]);
+
+          if (!active) return;
+          setPages(pagesRes.pages);
+          setIssues(issuesRes.issues);
+          setOptimizations(optRes.optimizations);
+          setLoading(false);
+        }
+      } catch (err) {
+        if (active) setError(err instanceof Error ? err.message : "Failed to load crawl status.");
+      }
+    }
+
+    poll();
+    interval = setInterval(poll, 2000);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [crawlId]);
+
+  if (error) {
+    return (
+      <div className="opt-run-summary">
+        <p className="error-text small">Failed to monitor targeted crawl: {error}</p>
+      </div>
+    );
+  }
+
+  if (!crawl || crawl.status === "QUEUED" || crawl.status === "RUNNING") {
+    const pct = crawl && crawl.stats.discovered > 0
+      ? Math.min(100, Math.round((crawl.stats.processed / crawl.stats.discovered) * 100))
+      : 0;
+
+    return (
+      <div className="opt-run-summary">
+        <p className="small">
+          Targeted crawl running for <strong>{urlsQueued.toLocaleString()}</strong> URL{urlsQueued === 1 ? "" : "s"}.
+          {" "}
+          <a href={`/site/${crawlId}`} className="gsc-detail-link" target="_blank" rel="noreferrer">
+            View full progress
+          </a>
+        </p>
+        <div className="progress-cell" style={{ marginTop: '8px' }}>
+          <div className="progress-bar">
+            <div className="progress-bar-fill progress-bar-fill-running" style={{ width: `${pct}%` }} />
+          </div>
+          <span className="muted small progress-count">
+            {crawl ? `${crawl.stats.processed}/${crawl.stats.discovered}` : "Starting..."}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  if (pages.length === 0) {
+    return (
+      <div className="opt-run-summary">
+        <p className="small">
+          Targeted crawl finished, but no pages were processed successfully.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="opt-run-summary">
+      <p className="small">
+        Targeted crawl completed for <strong>{pages.length.toLocaleString()}</strong> URL{pages.length === 1 ? "" : "s"}.
+        {" "}
+        <a href={`/site/${crawlId}`} className="gsc-detail-link" target="_blank" rel="noreferrer">
+          Open in Site View
+        </a>
+      </p>
+
+      <div className="gsc-table-wrap" style={{ marginTop: '16px' }}>
+        <table className="gsc-metric-table">
+          <thead>
+            <tr>
+              <th>Crawled URL</th>
+              <th className="gsc-th-num" style={{ width: 80 }}>Issues</th>
+              <th className="gsc-th-num" style={{ width: 80 }}>Fixes</th>
+              <th style={{ width: 100 }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {pages.map((p) => {
+              const pageIssues = issues.filter((i) => i.pageId === p.id);
+              const pageFixes = optimizations.filter((o) => o.pageId === p.id);
+              const isExpanded = expandedUrl === p.url;
+
+              return (
+                <Fragment key={p.id}>
+                  <tr>
+                    <td className="gsc-cell-label">
+                      <a href={p.url} target="_blank" rel="noreferrer noopener" title={p.url}>
+                        {p.url}
+                      </a>
+                    </td>
+                    <td className="gsc-td-num">
+                      {pageIssues.length > 0 ? (
+                        <span className="stat-chip stat-chip-danger">{pageIssues.length}</span>
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
+                    </td>
+                    <td className="gsc-td-num">
+                      {pageFixes.length > 0 ? (
+                        <span className="stat-chip stat-chip-accent">{pageFixes.length}</span>
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
+                    </td>
+                    <td style={{ textAlign: "right" }}>
+                      {(pageIssues.length > 0 || pageFixes.length > 0) && (
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => setExpandedUrl(isExpanded ? null : p.url)}
+                        >
+                          {isExpanded ? "Hide" : "View"}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                  {isExpanded && (pageIssues.length > 0 || pageFixes.length > 0) && (
+                    <tr className="gsc-detail-row">
+                      <td colSpan={4} style={{ padding: 0 }}>
+                        <div style={{ padding: '16px', background: 'var(--bg-inset)', borderBottom: '1px solid var(--border)' }}>
+                          {pageIssues.length > 0 && (
+                            <div style={{ marginBottom: pageFixes.length > 0 ? '16px' : 0 }}>
+                              <h5 style={{ margin: '0 0 8px 0', fontSize: '13px' }}>Found Issues</h5>
+                              <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '13px' }}>
+                                {pageIssues.map(issue => (
+                                  <li key={issue.id} style={{ marginBottom: '4px' }}>
+                                    <strong style={{ color: issue.severity === 'critical' ? 'var(--red-500)' : 'var(--orange-500)' }}>
+                                      {issue.type.replace(/_/g, " ")}:
+                                    </strong>{" "}
+                                    {issue.message}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                          {pageFixes.length > 0 && (
+                            <div>
+                              <h5 style={{ margin: '0 0 8px 0', fontSize: '13px' }}>Suggested Fixes</h5>
+                              <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '13px' }}>
+                                {pageFixes.map(fix => (
+                                  <li key={fix.id} style={{ marginBottom: '4px' }}>
+                                    <strong style={{ color: 'var(--blue-500)' }}>{fix.action.replace(/_/g, " ")}:</strong>{" "}
+                                    {fix.newValue}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }

@@ -79,6 +79,8 @@ export type CrawlLimits = {
   maxDepth: number;
   timeLimitMinutes: number;
   allowedHosts: string[];
+  /** Present only for a targeted crawl; skips homepage and sitemap seeding. */
+  seedUrls?: string[];
 };
 
 export type CrawlStats = {
@@ -496,6 +498,9 @@ export const gscProperties = pgTable(
   (table) => [index("gsc_properties_connection_idx").on(table.connectionId)],
 );
 
+/** Search verticals supported by the Search Analytics API. */
+export const gscSearchTypeEnum = pgEnum("gsc_search_type", ["web", "image"]);
+
 export const gscPageMetrics = pgTable(
   "gsc_page_metrics",
   {
@@ -517,6 +522,8 @@ export const gscPageMetrics = pgTable(
     normalizedUrl: text("normalized_url"),
     /** Date-only (YYYY-MM-DD); Search Console reports per calendar day. */
     date: date("date").notNull(),
+    /** Search vertical reported by Search Analytics; never mix web and image totals. */
+    searchType: gscSearchTypeEnum("search_type").notNull().default("web"),
 
     clicks: integer("clicks").notNull(),
     impressions: integer("impressions").notNull(),
@@ -530,15 +537,15 @@ export const gscPageMetrics = pgTable(
   (table) => [
     // Search Console restates recent days as data finalises, so a re-sync of
     // an overlapping window must update rather than duplicate.
-    uniqueIndex("gsc_page_metrics_unique_idx").on(table.propertyId, table.pageUrl, table.date),
-    index("gsc_page_metrics_property_date_idx").on(table.propertyId, table.date),
+    uniqueIndex("gsc_page_metrics_unique_idx").on(table.propertyId, table.pageUrl, table.date, table.searchType),
+    index("gsc_page_metrics_property_date_idx").on(table.propertyId, table.searchType, table.date),
     index("gsc_page_metrics_url_idx").on(table.propertyId, table.pageUrl),
     index("gsc_page_metrics_normalized_idx").on(table.propertyId, table.normalizedUrl),
   ],
 );
 
 /** Non-page dimensions Search Analytics can slice by. */
-export const gscDimensionEnum = pgEnum("gsc_dimension", ["query", "device", "country"]);
+export const gscDimensionEnum = pgEnum("gsc_dimension", ["query", "device", "country", "searchAppearance"]);
 
 /**
  * Window-aggregated slices: top queries, device split, country split.
@@ -558,6 +565,7 @@ export const gscBreakdowns = pgTable(
       .notNull()
       .references(() => gscProperties.id, { onDelete: "cascade" }),
     dimension: gscDimensionEnum("dimension").notNull(),
+    searchType: gscSearchTypeEnum("search_type").notNull().default("web"),
     /** The search term, device type, or ISO country code. */
     keyValue: text("key_value").notNull(),
 
@@ -578,11 +586,12 @@ export const gscBreakdowns = pgTable(
     uniqueIndex("gsc_breakdowns_unique_idx").on(
       table.propertyId,
       table.dimension,
+      table.searchType,
       table.keyValue,
       table.windowStart,
       table.windowEnd,
     ),
-    index("gsc_breakdowns_lookup_idx").on(table.propertyId, table.dimension, table.windowEnd),
+    index("gsc_breakdowns_lookup_idx").on(table.propertyId, table.searchType, table.dimension, table.windowEnd),
   ],
 );
 

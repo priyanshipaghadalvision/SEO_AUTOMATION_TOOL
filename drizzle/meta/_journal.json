@@ -113,6 +113,13 @@
       "when": 1786614413523,
       "tag": "0015_gsc_sitemaps_vitals_security",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1786700000000,
+      "tag": "0016_gsc_image_search_appearances",
+      "breakpoints": true
     }
   ]
 }
